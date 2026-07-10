@@ -6,9 +6,9 @@ and idempotency of the patch script.
 Requirements: 8.1, 8.2, 8.3, 8.5, 8.6
 """
 
-import sys
-import os
 import math
+import os
+import sys
 
 import numpy as np
 import pytest
@@ -18,8 +18,7 @@ from monet_plots.plots.radar import compute_radar_metrics
 
 # Import patch utilities from the scripts directory
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
-from patch_radar import is_already_patched, RADAR_SOURCE
-
+from patch_radar import RADAR_SOURCE, is_already_patched
 
 # ---------------------------------------------------------------------------
 # Test IOA, KGE, CCC computed correctly for known inputs (Req 8.1, 8.2, 8.3)
@@ -106,9 +105,7 @@ class TestKnownValues:
         std_pred = np.std(pred, ddof=1)
         var_obs = std_obs**2
         var_pred = std_pred**2
-        expected_ccc = 2.0 * 1.0 * std_obs * std_pred / (
-            var_obs + var_pred + (3.0 - 6.0) ** 2
-        )
+        expected_ccc = 2.0 * 1.0 * std_obs * std_pred / (var_obs + var_pred + (3.0 - 6.0) ** 2)
         assert result["CCC"] == pytest.approx(expected_ccc, abs=1e-10)
 
     def test_all_three_keys_present(self):

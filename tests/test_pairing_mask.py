@@ -132,6 +132,41 @@ class TestPairingMaskExceptionHandling:
         assert any("Failed to apply mask" in record.message for record in caplog.records)
         assert any(record.levelno == logging.ERROR for record in caplog.records)
 
+
+def test_source_and_target_duplicate_time_values_are_deduplicated_before_pairing(mocker):
+    """Duplicate time values in source/target are dropped before monet pairing."""
+    from mdt.tasks.pairing import pair_data
+
+    source = xr.Dataset(
+        {"mod": ("time", [1.0, 1.5, 2.0])},
+        coords={"time": ["2023-08-01T00:00:00", "2023-08-01T00:00:00", "2023-08-01T01:00:00"]},
+    )
+    target = xr.Dataset(
+        {"obs": ("time", [10.0, 11.0, 12.0])},
+        coords={"time": ["2023-08-01T00:00:00", "2023-08-01T00:00:00", "2023-08-01T01:00:00"]},
+    )
+
+    mock_pair = mocker.patch("monet.util.combinetool.pair", return_value=source)
+
+    pair_data(
+        name="test_pair_dupe_time",
+        method="nearest",
+        source_data=source,
+        target_data=target,
+        kwargs={},
+    )
+
+    called_source = mock_pair.call_args[0][0]
+    called_target = mock_pair.call_args[0][1]
+
+    assert isinstance(called_source, xr.Dataset)
+    assert called_source.indexes["time"].is_unique
+    assert called_source.sizes["time"] == 2
+
+    assert isinstance(called_target, xr.Dataset)
+    assert called_target.indexes["time"].is_unique
+    assert called_target.sizes["time"] == 2
+
     def test_runtime_error_logged_and_reraised(self, mocker, mock_pair, dummy_paired_dataset, caplog):
         """Non-ValueError exceptions from query_mask are also logged and re-raised."""
         from mdt.tasks.pairing import pair_data

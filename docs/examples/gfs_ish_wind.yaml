@@ -1,0 +1,77 @@
+data:
+  gfs_model:
+    type: "gfs"
+    kwargs:
+      dates: "2023-08-01"
+      lead_time: [0, 3, 6, 9, 12, 15, 18, 21, 24]
+      # GFS wind components are loaded at the 10 m level (level type 103, value 10)
+      filters:
+        typeOfFirstFixedSurface: 103 # 10 m above ground level
+        valueOfFirstFixedSurface: 10
+      isel:
+        height_above_ground: 0
+    zarr_store:
+      enabled: true
+      backend: "icechunk"
+      icechunk_url: "./zarr_stores/gfs_wind_icechunk"
+      max_scan_attempts: 5
+      network_timeout: 60.0
+      max_concurrent_requests: 16
+
+  ish_lite_obs:
+    type: "ish_lite"
+    kwargs:
+      dates: "2023-08-01"
+
+pairing:
+  pair_gfs_ish:
+    source: "gfs_model"
+    target: "ish_lite_obs"
+    method: "nearest"
+
+statistics:
+  wind_stats:
+    input: "pair_gfs_ish"
+    metrics: ["rmse", "mb", "mae", "mse", "mape", "ioa_m", "fac2", "r2", "d1", "e1", "ac"]
+    kwargs:
+      obs_var: "ws"
+      mod_var: "WSPD_10maboveground"
+      savename: "gfs_ish_wind_stats.md"
+
+plots:
+  timeseries_rmse:
+    input: "pair_gfs_ish"
+    type: "timeseriesstat"
+    kwargs:
+      savename: "gfs_ish_wind_timeseries_rmse.png"
+      var1: "ws"
+      var2: "WSPD_10maboveground"
+      freq: "3h"
+      stat: "rmse"
+      markersize: 1
+
+  scatter_wind:
+    input: "pair_gfs_ish"
+    type: "scatter"
+    kwargs:
+      savename: "gfs_ish_wind_scatter.png"
+      x: "ws"
+      y: "WSPD_10maboveground"
+      title: "GFS vs ISH-Lite Wind Speed"
+
+  spatial_bias:
+    input: "pair_gfs_ish"
+    type: "spatial_bias_scatter"
+    kwargs:
+      savename: "gfs_ish_wind_spatial_bias.png"
+      col1: "ws"
+      col2: "WSPD_10maboveground"
+      fact: 0.03
+
+  conditional_quantile_temp:
+    input: "pair_gfs_ish"
+    type: "conditional_quantile"
+    kwargs:
+      savename: "gfs_ish_ws_conditional_quantile.png"
+      obs_col: "ws"
+      mod_col: "WSPD_10maboveground"

@@ -17,13 +17,10 @@ import pytest
 import xarray as xr
 
 from mdt.tasks.plotting import (
-    _filter_by_region,
     _find_region_variable,
-    _is_empty,
     _sanitize_region_name,
     generate_plot,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -68,8 +65,7 @@ def dataset_with_empty_region():
     """Create a dataset where one region has no matching data points."""
     n = 8
     # Only "North America" and "Europe" have data; "Antarctica" does not
-    regions = ["North America", "Europe", "North America", "Europe",
-               "North America", "Europe", "North America", "Europe"]
+    regions = ["North America", "Europe", "North America", "Europe", "North America", "Europe", "North America", "Europe"]
     return xr.Dataset(
         {
             "temperature": ("x", np.random.rand(n)),
@@ -175,8 +171,7 @@ class TestRegionPlaceholderSubstitution:
         ds = xr.Dataset(
             {
                 "temperature": ("x", np.random.rand(n)),
-                "land": ("x", ["US/Canada (East)", "US/Canada (East)",
-                               "US/Canada (East)", "US/Canada (East)"]),
+                "land": ("x", ["US/Canada (East)", "US/Canada (East)", "US/Canada (East)", "US/Canada (East)"]),
             },
             coords={
                 "lat": ("x", np.linspace(30, 50, n)),

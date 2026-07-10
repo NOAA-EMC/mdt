@@ -8,15 +8,41 @@ import networkx as nx
 
 from mdt.engine_registry import Engine
 from mdt.hpc import HPCProfileFactory
-from mdt.tasks.data import load_data
+from mdt.tasks.data import load_data, save_data
 from mdt.tasks.pairing import combine_paired_data, pair_data
 from mdt.tasks.plotting import generate_plot
+from mdt.tasks.reductions import calculate_reduction
 from mdt.tasks.statistics import compute_statistics
 
 if TYPE_CHECKING:
     from mdt.config import ConfigParser
 
 logger = logging.getLogger(__name__)
+
+
+def prefect_calculate_reduction(
+    name: str,
+    data: Any,
+    method: str,
+    dim: Any,
+    force_weighted: bool,
+    kwargs: Dict[str, Any],
+) -> Any:
+    """Prefect task wrapper for calculate_reduction."""
+    from prefect import get_run_logger
+
+    logger = get_run_logger()
+    logger.info(f"Reducing dataset '{name}' using method '{method}' over dim: {dim}")
+    return calculate_reduction(data, method, dim, force_weighted, **kwargs)
+
+
+def prefect_save_data(name: str, data: Any, backend: str, url: str, kwargs: Dict[str, Any]) -> Any:
+    """Prefect task wrapper for save_data."""
+    from prefect import get_run_logger
+
+    logger = get_run_logger()
+    logger.info(f"Saving dataset '{name}' using backend '{backend}' to '{url}'")
+    return save_data(name, data, backend, url, kwargs)
 
 
 def prefect_load_data(name: str, dataset_type: str, kwargs: Dict[str, Any]) -> Any:
@@ -80,7 +106,6 @@ class PrefectEngine(Engine):
     def __init__(self, dag: nx.DiGraph, config: "ConfigParser"):
         self.dag = dag
         self.config = config
-        self.client: Any = None
         self.clusters: Dict[str, Any] = {}
 
     def _setup_dask_clusters(self) -> Any:
@@ -118,7 +143,6 @@ class PrefectEngine(Engine):
             host="0.0.0.0",  # noqa: S104 — Allow external connections
         )
         scheduler_address = primary_cluster.scheduler_address
-        self.client = dask.distributed.Client(primary_cluster)
 
         for cluster_name, cfg in clusters_cfg.items():
             mode = cfg.get("mode", "local")
@@ -203,7 +227,6 @@ class PrefectEngine(Engine):
         # Prefect Task Wrappers — defined here so the @task decorator is only
         # evaluated when Prefect is actually installed and execute() is called.
         # Requirement 3.5: We maintain lazy imports.
-
         from prefect.cache_policies import NONE as NO_CACHE
 
         p_load_data = task(name="Load Data", cache_policy=NO_CACHE)(prefect_load_data)
@@ -211,32 +234,45 @@ class PrefectEngine(Engine):
         p_combine_paired_data = task(name="Combine Paired Data", cache_policy=NO_CACHE)(prefect_combine_paired_data)
         p_compute_statistics = task(name="Compute Statistics", cache_policy=NO_CACHE)(prefect_compute_statistics)
         p_generate_plot = task(name="Generate Plot", cache_policy=NO_CACHE)(prefect_generate_plot)
+        p_calculate_reduction = task(name="Calculate Reduction", cache_policy=NO_CACHE)(prefect_calculate_reduction)
+        p_save_data = task(name="Save Data", cache_policy=NO_CACHE)(prefect_save_data)
+
+        from contextlib import nullcontext
 
         import dask
-        from contextlib import nullcontext
 
         # Determine if we need Dask resource annotations
         exec_cfg = self.config.execution
         clusters_cfg = exec_cfg.get("clusters", {})
         use_dask_runner = len(clusters_cfg) > 1 or any(
-            cfg.get("mode", "local") != "local" or cfg.get("workers", 1) > 1
-            for cfg in clusters_cfg.values()
+            cfg.get("mode", "local") != "local" or cfg.get("workers", 1) > 1 for cfg in clusters_cfg.values()
         )
+        serialize_pair_tasks = all(cfg.get("mode", "local") == "local" for cfg in clusters_cfg.values())
+
+        def _resolve_output(value: Any) -> Any:
+            if hasattr(value, "result") and callable(value.result):
+                return value.result()
+            return value
+
+        # Snapshot mutable engine state into local variables so the flow closure
+        # does not capture `self` (which may hold non-picklable Dask client state).
+        dag = self.dag
 
         # Define the Prefect flow inline to capture the instance variables
         @flow(name="MDT Verification Workflow")  # type: ignore
         def mdt_flow() -> Dict[str, Any]:
             # Dictionary to store the output futures of each task
             task_outputs: Dict[str, Any] = {}
+            last_pair_future: Any = None
 
             # Use topological sort to process nodes in the correct dependency order
-            for node_id in nx.topological_sort(self.dag):
-                node_data = self.dag.nodes[node_id]
+            for node_id in nx.topological_sort(dag):
+                node_data = dag.nodes[node_id]
                 task_type = node_data["task_type"]
                 target_cluster = node_data.get("cluster")
 
                 # Retrieve the inputs from the dependencies that have already run
-                predecessors = list(self.dag.predecessors(node_id))
+                predecessors = list(dag.predecessors(node_id))
 
                 # We will use Prefect's `.with_options` to inject standard Dask resources.
                 # If target_cluster is None, default to "COMPUTE"
@@ -267,22 +303,42 @@ class PrefectEngine(Engine):
 
                         # Resolve node IDs from the actual predecessors in the DAG
                         # We look for nodes where the 'name' attribute matches the requested source/target names
-                        source_node_id = next((p for p in predecessors if self.dag.nodes[p].get("name") == source_name), None)
-                        target_node_id = next((p for p in predecessors if self.dag.nodes[p].get("name") == target_name), None)
+                        source_node_id = next((p for p in predecessors if dag.nodes[p].get("name") == source_name), None)
+                        target_node_id = next((p for p in predecessors if dag.nodes[p].get("name") == target_name), None)
 
                         if not source_node_id or not target_node_id:
                             logger.error(
                                 f"Failed to resolve predecessors for pairing '{node_id}'. Source: {source_node_id}, Target: {target_node_id}"
                             )
 
-                        future = p_pair_data.submit(
-                            name=node_data["name"],
-                            method=node_data["method"],
-                            source_data=task_outputs.get(source_node_id) if source_node_id else None,
-                            target_data=task_outputs.get(target_node_id) if target_node_id else None,
-                            kwargs=node_data["kwargs"],
-                        )
-                        task_outputs[node_id] = future
+                        source_output = task_outputs.get(source_node_id) if source_node_id else None
+                        target_output = task_outputs.get(target_node_id) if target_node_id else None
+
+                        if serialize_pair_tasks:
+                            if last_pair_future is not None:
+                                _resolve_output(last_pair_future)
+
+                            # Keep Monet pairing on the flow thread for local runs.
+                            # This avoids ESMF VM/thread initialization issues in Prefect workers
+                            # while preserving the same pairing implementation path.
+                            pair_result = prefect_pair_data(
+                                name=node_data["name"],
+                                method=node_data["method"],
+                                source_data=_resolve_output(source_output),
+                                target_data=_resolve_output(target_output),
+                                kwargs=node_data["kwargs"],
+                            )
+                            task_outputs[node_id] = pair_result
+                            last_pair_future = pair_result
+                        else:
+                            future = p_pair_data.submit(
+                                name=node_data["name"],
+                                method=node_data["method"],
+                                source_data=source_output,
+                                target_data=target_output,
+                                kwargs=node_data["kwargs"],
+                            )
+                            task_outputs[node_id] = future
 
                     elif task_type == "combine_paired_data":
                         # Collect all inputs from predecessors (pairing tasks)
@@ -327,6 +383,31 @@ class PrefectEngine(Engine):
                         )
                         task_outputs[node_id] = future
 
+                    elif task_type == "calculate_reduction":
+                        # Only one predecessor (input)
+                        input_node = predecessors[0] if predecessors else None
+                        future = p_calculate_reduction.submit(
+                            name=node_data["name"],
+                            data=task_outputs.get(input_node) if input_node else None,
+                            method=node_data["method"],
+                            dim=node_data["dim"],
+                            force_weighted=node_data["force_weighted"],
+                            kwargs=node_data["kwargs"],
+                        )
+                        task_outputs[node_id] = future
+
+                    elif task_type == "save_data":
+                        # Only one predecessor (input)
+                        input_node = predecessors[0] if predecessors else None
+                        future = p_save_data.submit(
+                            name=node_data["name"],
+                            data=task_outputs.get(input_node) if input_node else None,
+                            backend=node_data["backend"],
+                            url=node_data["url"],
+                            kwargs=node_data["kwargs"],
+                        )
+                        task_outputs[node_id] = future
+
             logger.info("All tasks submitted to Prefect.")
             return task_outputs
 
@@ -335,12 +416,14 @@ class PrefectEngine(Engine):
         if use_dask_runner:
             # Setup Dask clusters and configure Prefect to use the central scheduler
             from prefect_dask.task_runners import DaskTaskRunner
+
             cluster = self._setup_dask_clusters()
             logger.info(f"Central Dask Scheduler address: {cluster.scheduler_address}")
             task_futures: Dict[str, Any] = mdt_flow.with_options(task_runner=cast(Any, DaskTaskRunner(address=cluster.scheduler_address)))()
         else:
             # Single local worker — use ConcurrentTaskRunner (no Dask serialization overhead)
             from prefect.task_runners import ConcurrentTaskRunner
+
             task_futures = mdt_flow.with_options(task_runner=ConcurrentTaskRunner())()
 
         # Requirement: Ensure the CLI waits for task completion.
@@ -350,7 +433,7 @@ class PrefectEngine(Engine):
         for node_id, future in task_futures.items():
             try:
                 # This will block until the specific task is done.
-                final_results[node_id] = future.result()
+                final_results[node_id] = _resolve_output(future)
             except Exception as e:
                 logger.error(f"Task {node_id} failed: {e}")
                 final_results[node_id] = e

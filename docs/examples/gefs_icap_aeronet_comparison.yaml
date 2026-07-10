@@ -1,0 +1,115 @@
+# Comparison of MERRA-2 and ICAP-MME against AERONET observations
+# and Direct Model-to-Model Bias Analysis
+
+data:
+  gefs_model:
+    type: "gefs"
+    kwargs:
+      start_date: "2023-01-01"
+      end_date: "2023-01-04"
+      product: "aerosol"
+      lead_time: [0, 3, 6, 9, 12, 15, 18, 21, 24]
+      # grib2io/xarray backend filtering compatible with PR 246 workflows
+      filters:
+        typeOfFirstFixedSurface: 10 # Entire atmosphere aerosol variables
+        shortName: ["totAOD550"]
+    zarr_store:
+      enabled: true
+      backend: "icechunk"
+      # Local Icechunk destination for virtual references.
+      icechunk_url: "./zarr_stores/gefs_aerosol_icechunk"
+      max_scan_attempts: 5
+      network_timeout: 300.0
+      max_concurrent_requests: 4
+
+  icap_mme_model:
+    type: "icap_mme"
+    kwargs:
+      dates: "2023-01-04"
+      product: "MMC"
+      data_var: "modeaod550"
+      download: true
+
+  aeronet_obs:
+    type: "aeronet"
+    kwargs:
+      dates: "2023-01-01"
+
+pairing:
+  # Model vs Obs (Interpolation to AERONET sites)
+  pair_gefs_obs:
+    source: "gefs_model"
+    target: "aeronet_obs"
+    method: "nearest"
+
+  pair_icap_obs:
+    source: "icap_mme_model"
+    target: "aeronet_obs"
+    method: "nearest"
+
+  # Model vs Model (Regrid GEFS to ICAP-MME grid for bias plot)
+  pair_gefs_icap:
+    source: "gefs_model"
+    target: "icap_mme_model"
+    method: "bilinear"
+    kwargs:
+      merge: true
+      suffix: "_icap"
+
+combine:
+  obs_comparison:
+    sources:
+      - pair_gefs_obs
+      - pair_icap_obs
+    dim: "model"
+
+statistics:
+  # Stats against AERONET
+  obs_stats:
+    input: "obs_comparison"
+    metrics: ["rmse", "mb", "corr"]
+    kwargs:
+      obs_var: "aod_551nm"
+      mod_var: "totAOD550"
+
+  # Direct Model Bias (Gridded)
+  model_bias_stats:
+    input: "pair_gefs_icap"
+    metrics: ["mb"]
+    kwargs:
+      obs_var: "total_aod_mean"  # ICAP acts as reference
+      mod_var: "totAOD550"
+      dim: "time"
+
+plots:
+  # Map of model performance at observation sites
+  obs_spatial_map:
+    input: "obs_comparison"
+    type: "spatial"
+    kwargs:
+      title: "GEFS and ICAP-MME vs AERONET (RMSE)"
+      obs_var: "aod_551nm"
+      mod_var:
+        - "totAOD550"
+        - "modeaod550"
+      savename: "obs_comparison_map.png"
+
+  # Spatial bias map: MERRA-2 vs ICAP-MME
+  model_bias_map:
+    input: "model_bias_stats"
+    type: "spatial"
+    kwargs:
+      savename: "gefs_vs_icap_bias.png"
+      title: "GEFS minus ICAP-MME Mean Bias"
+      cmap: "RdBu_r"
+      vmin: -0.5
+      vmax: 0.5
+      style: "pivotal_weather"
+
+
+# execution:
+#   default_cluster: "local"
+#   clusters:
+#     local:
+#       mode: "local"
+#       workers: 4

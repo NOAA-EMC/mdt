@@ -8,7 +8,7 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
-VALID_ZARR_BACKENDS = {"kerchunk_json", "kerchunk_parquet", "icechunk"}
+VALID_ZARR_BACKENDS = {"kerchunk_json", "kerchunk_parquet", "icechunk", "zarr"}
 
 
 class ConfigParser:
@@ -72,9 +72,9 @@ class ConfigParser:
                                 f"unsupported zarr_store.backend '{backend}'. "
                                 f"Supported: {sorted(VALID_ZARR_BACKENDS)}"
                             )
-                        if backend == "icechunk" and not zarr_store.get("icechunk_repo"):
+                        if backend == "icechunk" and not (zarr_store.get("icechunk_url") or zarr_store.get("icechunk_repo")):
                             raise ValueError(
-                                f"Configuration validation failed: Data source '{name}': 'icechunk_repo' is required for 'icechunk' backend."
+                                f"Configuration validation failed: Data source '{name}': 'icechunk_repo' is required for 'icechunk' backend (preferred key: 'icechunk_url')."
                             )
 
         if "pairing" in self.config:
@@ -112,6 +112,31 @@ class ConfigParser:
                 if "input" not in details:
                     raise ValueError(f"Configuration validation failed: Plot task '{name}' must specify an 'input' key.")
 
+        if "reductions" in self.config:
+            if not isinstance(self.config["reductions"], dict):
+                raise ValueError(
+                    f"Configuration validation failed: 'reductions' section must be a dictionary, got {type(self.config['reductions']).__name__}."
+                )
+            for name, details in self.config["reductions"].items():
+                if not isinstance(details, dict):
+                    raise ValueError(f"Configuration validation failed: Reduction task '{name}' must be a dictionary, got {type(details).__name__}.")
+                if "input" not in details or "dim" not in details:
+                    raise ValueError(f"Configuration validation failed: Reduction task '{name}' must specify 'input' and 'dim' fields.")
+
+        if "save" in self.config:
+            if not isinstance(self.config["save"], dict):
+                raise ValueError(
+                    f"Configuration validation failed: 'save' section must be a dictionary, got {type(self.config['save']).__name__}."
+                )
+            for name, details in self.config["save"].items():
+                if not isinstance(details, dict):
+                    raise ValueError(f"Configuration validation failed: Save task '{name}' must be a dictionary, got {type(details).__name__}.")
+                if "input" not in details or "backend" not in details or "url" not in details:
+                    raise ValueError(f"Configuration validation failed: Save task '{name}' must specify 'input', 'backend', and 'url' fields.")
+                backend = details["backend"]
+                if backend not in {"icechunk", "zarr"}:
+                    raise ValueError(f"Configuration validation failed: Save task '{name}': unsupported backend '{backend}'. Supported: 'icechunk', 'zarr'.")
+
         self._validate_region_masking()
 
     def _validate_region_masking(self) -> None:
@@ -122,8 +147,7 @@ class ConfigParser:
                 mask_val = details["mask"]
                 if not isinstance(mask_val, str) or not mask_val.strip():
                     raise ValueError(
-                        f"Configuration validation failed: Pairing '{name}' has invalid "
-                        f"'mask' value \u2014 must be a non-empty string."
+                        f"Configuration validation failed: Pairing '{name}' has invalid 'mask' value \u2014 must be a non-empty string."
                     )
 
         # Validate regions in plots and statistics
@@ -132,11 +156,7 @@ class ConfigParser:
                 kwargs = details.get("kwargs", {}) or {}
                 if "regions" in kwargs:
                     regions = kwargs["regions"]
-                    if (
-                        not isinstance(regions, list)
-                        or len(regions) == 0
-                        or not all(isinstance(r, str) and r.strip() for r in regions)
-                    ):
+                    if not isinstance(regions, list) or len(regions) == 0 or not all(isinstance(r, str) and r.strip() for r in regions):
                         raise ValueError(
                             f"Configuration validation failed: {section_name.title()} task "
                             f"'{name}' has invalid 'regions' \u2014 must be a list of non-empty strings."
@@ -175,6 +195,16 @@ class ConfigParser:
     def plots(self) -> Dict[str, Any]:
         """dict: The 'plots' section of the configuration."""
         return cast(Dict[str, Any], self.config.get("plots", {}))
+
+    @property
+    def reductions(self) -> Dict[str, Any]:
+        """dict: The 'reductions' section of the configuration."""
+        return cast(Dict[str, Any], self.config.get("reductions", {}))
+
+    @property
+    def save(self) -> Dict[str, Any]:
+        """dict: The 'save' section of the configuration."""
+        return cast(Dict[str, Any], self.config.get("save", {}))
 
     @property
     def orchestrator(self) -> str:

@@ -160,9 +160,7 @@ class TestEcFlowE2E:
         defs = engine.build_suite()
 
         tasks = defs.get_all_tasks()
-        assert len(tasks) == 5, (
-            f"Expected 5 task nodes (2 load + 1 pair + 1 stats + 1 plot), got {len(tasks)}"
-        )
+        assert len(tasks) == 5, f"Expected 5 task nodes (2 load + 1 pair + 1 stats + 1 plot), got {len(tasks)}"
 
     def test_trigger_expressions_match_dag(self, ecflow_server, gfs_ish_lite_config_path):
         """Trigger expressions on task nodes reflect the DAG dependency edges.
@@ -291,9 +289,7 @@ class TestEcFlowE2E:
         assert json.loads(plot_vars["METRICS"]) == []
         assert plot_vars["METHOD"] == ""
 
-    def test_wrapper_dispatches_to_correct_task(
-        self, ecflow_server, gfs_ish_lite_config_path, tmp_path
-    ):
+    def test_wrapper_dispatches_to_correct_task(self, ecflow_server, gfs_ish_lite_config_path, tmp_path):
         """Each generated .ecf wrapper script contains the correct mdt.tasks.* import
         for its task type.
 
@@ -329,8 +325,7 @@ class TestEcFlowE2E:
             content = script_path.read_text()
             expected_import = expected_imports[task_type]
             assert expected_import in content, (
-                f"Wrapper script for {node_id} (task_type={task_type}) "
-                f"does not contain expected import: {expected_import}"
+                f"Wrapper script for {node_id} (task_type={task_type}) does not contain expected import: {expected_import}"
             )
 
     def test_wrapper_scripts_generated(self, ecflow_server, gfs_ish_lite_config_path, tmp_path):
@@ -394,40 +389,28 @@ class TestEcFlowE2E:
 
         # Assert expected families exist (iterate using .nodes)
         # Note: build_suite() creates all families from _FAMILY_MAP even if empty
-        family_names = sorted(
-            node.name() for node in mdt_suite.nodes if isinstance(node, ecflow.Family)
-        )
+        family_names = sorted(node.name() for node in mdt_suite.nodes if isinstance(node, ecflow.Family))
         # The gfs_ish_lite DAG uses load, pair, statistics, plot families
         # The combine family is also created (from _FAMILY_MAP) but has no tasks
         for expected in ["load", "pair", "statistics", "plot"]:
-            assert expected in family_names, (
-                f"Expected family '{expected}' not found. Got: {family_names}"
-            )
+            assert expected in family_names, f"Expected family '{expected}' not found. Got: {family_names}"
 
         # Assert expected tasks exist within each family
         family_tasks: dict[str, list[str]] = {}
         for node in mdt_suite.nodes:
             if isinstance(node, ecflow.Family):
-                family_tasks[node.name()] = sorted(
-                    child.name() for child in node.nodes if isinstance(child, ecflow.Task)
-                )
+                family_tasks[node.name()] = sorted(child.name() for child in node.nodes if isinstance(child, ecflow.Task))
 
         # The load family should have 2 tasks (gfs and ish_lite)
-        assert len(family_tasks["load"]) == 2, (
-            f"Expected 2 load tasks, got {len(family_tasks['load'])}: {family_tasks['load']}"
-        )
+        assert len(family_tasks["load"]) == 2, f"Expected 2 load tasks, got {len(family_tasks['load'])}: {family_tasks['load']}"
         # The pair family should have 1 task
-        assert len(family_tasks["pair"]) == 1, (
-            f"Expected 1 pair task, got {len(family_tasks['pair'])}: {family_tasks['pair']}"
-        )
+        assert len(family_tasks["pair"]) == 1, f"Expected 1 pair task, got {len(family_tasks['pair'])}: {family_tasks['pair']}"
         # The statistics family should have 1 task
         assert len(family_tasks["statistics"]) == 1, (
             f"Expected 1 statistics task, got {len(family_tasks['statistics'])}: {family_tasks['statistics']}"
         )
         # The plot family should have 1 task
-        assert len(family_tasks["plot"]) == 1, (
-            f"Expected 1 plot task, got {len(family_tasks['plot'])}: {family_tasks['plot']}"
-        )
+        assert len(family_tasks["plot"]) == 1, f"Expected 1 plot task, got {len(family_tasks['plot'])}: {family_tasks['plot']}"
 
         # Verify total task count matches DAG
         total_tasks = sum(len(tasks) for tasks in family_tasks.values())
@@ -439,9 +422,7 @@ class TestEcFlowE2E:
         except Exception:
             pass
 
-    def test_server_load_and_begin_suite(
-        self, ecflow_server, gfs_ish_lite_config_path, tmp_path
-    ):
+    def test_server_load_and_begin_suite(self, ecflow_server, gfs_ish_lite_config_path, tmp_path):
         """Load suite into real ecFlow server and verify it is begun.
 
         Configures EcFlowEngine to point at the real local ecFlow server fixture,
@@ -480,14 +461,10 @@ class TestEcFlowE2E:
 
         # Assert the suite is present in the server definitions
         suite = server_defs.find_suite(engine.suite_name)
-        assert suite is not None, (
-            f"Suite '{engine.suite_name}' not found on server after _load_and_start()"
-        )
+        assert suite is not None, f"Suite '{engine.suite_name}' not found on server after _load_and_start()"
 
         # Assert the suite is in a begun state
-        assert suite.begun(), (
-            f"Suite '{engine.suite_name}' is not in begun state after _load_and_start()"
-        )
+        assert suite.begun(), f"Suite '{engine.suite_name}' is not in begun state after _load_and_start()"
 
     def test_connection_failure(self, gfs_ish_lite_config_path):
         """Assert RuntimeError is raised with host and port when connecting to an invalid port.
@@ -521,25 +498,18 @@ class TestDataFlowIntegrity:
         import xarray as xr
 
         # Assert result is an xarray Dataset
-        assert isinstance(gfs_data, xr.Dataset), (
-            f"Expected xr.Dataset, got {type(gfs_data).__name__}"
-        )
+        assert isinstance(gfs_data, xr.Dataset), f"Expected xr.Dataset, got {type(gfs_data).__name__}"
 
         # Assert it has a temperature variable (TMP_2maboveground or similar)
         temp_vars = [v for v in gfs_data.data_vars if "TMP" in v or "tmp" in v or "temperature" in v.lower()]
         assert len(temp_vars) > 0, (
-            f"Expected at least one temperature variable (e.g. TMP_2maboveground), "
-            f"but found data_vars: {list(gfs_data.data_vars)}"
+            f"Expected at least one temperature variable (e.g. TMP_2maboveground), but found data_vars: {list(gfs_data.data_vars)}"
         )
 
         # Assert it has latitude and longitude coordinates
         coord_names = {name.lower() for name in gfs_data.coords}
-        assert "latitude" in coord_names or "lat" in coord_names, (
-            f"Expected latitude coordinate, but found coords: {list(gfs_data.coords)}"
-        )
-        assert "longitude" in coord_names or "lon" in coord_names, (
-            f"Expected longitude coordinate, but found coords: {list(gfs_data.coords)}"
-        )
+        assert "latitude" in coord_names or "lat" in coord_names, f"Expected latitude coordinate, but found coords: {list(gfs_data.coords)}"
+        assert "longitude" in coord_names or "lon" in coord_names, f"Expected longitude coordinate, but found coords: {list(gfs_data.coords)}"
 
     def test_statistics_output_is_numeric_dict(self, paired_data):
         """Statistics computation on real paired data returns a dict with rmse and mb
@@ -597,18 +567,14 @@ class TestDataFlowIntegrity:
         import xarray as xr
 
         # Assert result is a pd.DataFrame or xr.Dataset
-        assert isinstance(ish_lite_data, (pd.DataFrame, xr.Dataset)), (
-            f"Expected pd.DataFrame or xr.Dataset, got {type(ish_lite_data)}"
-        )
+        assert isinstance(ish_lite_data, (pd.DataFrame, xr.Dataset)), f"Expected pd.DataFrame or xr.Dataset, got {type(ish_lite_data)}"
 
         if isinstance(ish_lite_data, pd.DataFrame):
             columns = ish_lite_data.columns.tolist()
 
             # Assert it contains observation values (temperature data)
             temp_candidates = [c for c in columns if "t" in c.lower() or "temp" in c.lower()]
-            assert len(temp_candidates) > 0, (
-                f"Expected temperature observation column, got columns: {columns}"
-            )
+            assert len(temp_candidates) > 0, f"Expected temperature observation column, got columns: {columns}"
 
             # Assert it has station location metadata (latitude, longitude)
             col_lower = [c.lower() for c in columns]
@@ -622,12 +588,8 @@ class TestDataFlowIntegrity:
             all_names = list(ish_lite_data.data_vars) + list(ish_lite_data.coords)
 
             # Assert it contains observation values (temperature data)
-            temp_candidates = [
-                n for n in all_names if "t" in n.lower() or "temp" in n.lower()
-            ]
-            assert len(temp_candidates) > 0, (
-                f"Expected temperature variable/coordinate, got: {all_names}"
-            )
+            temp_candidates = [n for n in all_names if "t" in n.lower() or "temp" in n.lower()]
+            assert len(temp_candidates) > 0, f"Expected temperature variable/coordinate, got: {all_names}"
 
             # Assert it has station location metadata (latitude, longitude)
             names_lower = [n.lower() for n in all_names]
@@ -663,8 +625,7 @@ class TestDataFlowIntegrity:
 
         file_saved = Path(output_file).exists()
         assert result is not None or file_saved, (
-            "Expected either a plot object to be returned or a file to be saved at "
-            f"{output_file}, but got neither"
+            f"Expected either a plot object to be returned or a file to be saved at {output_file}, but got neither"
         )
 
     def test_paired_output_contains_both_variables(self, paired_data):
@@ -681,18 +642,10 @@ class TestDataFlowIntegrity:
         elif isinstance(paired_data, pd.DataFrame):
             all_names = list(paired_data.columns)
         else:
-            raise AssertionError(
-                f"Expected xr.Dataset or pd.DataFrame, got {type(paired_data).__name__}"
-            )
+            raise AssertionError(f"Expected xr.Dataset or pd.DataFrame, got {type(paired_data).__name__}")
 
-        assert "TMP_2maboveground" in all_names, (
-            f"Expected model variable 'TMP_2maboveground' in paired output, "
-            f"got: {all_names}"
-        )
-        assert "t2m" in all_names, (
-            f"Expected observation variable 't2m' in paired output, "
-            f"got: {all_names}"
-        )
+        assert "TMP_2maboveground" in all_names, f"Expected model variable 'TMP_2maboveground' in paired output, got: {all_names}"
+        assert "t2m" in all_names, f"Expected observation variable 't2m' in paired output, got: {all_names}"
 
 
 @pytest.mark.network
@@ -720,38 +673,26 @@ class TestPrefectE2E:
         dag = DAGBuilder(config).build()
 
         # Verify the DAG has the expected 5 nodes before execution
-        assert len(dag.nodes) == 5, (
-            f"Expected 5 DAG nodes (2 load + 1 pair + 1 stats + 1 plot), "
-            f"got {len(dag.nodes)}: {list(dag.nodes)}"
-        )
+        assert len(dag.nodes) == 5, f"Expected 5 DAG nodes (2 load + 1 pair + 1 stats + 1 plot), got {len(dag.nodes)}: {list(dag.nodes)}"
 
         # Override execution config to give the Dask worker unlimited memory
         # (the GFS file is ~469 MB and default worker memory limit can cause OOM kills)
         config.config.setdefault("execution", {})
-        config.config["execution"]["clusters"] = {
-            "compute": {"mode": "local", "workers": 1, "memory_limit": 0}
-        }
+        config.config["execution"]["clusters"] = {"compute": {"mode": "local", "workers": 1, "memory_limit": 0}}
 
         # Create PrefectEngine and execute the full pipeline
         engine = PrefectEngine(dag=dag, config=config)
         results = engine.execute()
 
         # Assert all 5 DAG nodes produced results
-        assert len(results) == 5, (
-            f"Expected results for all 5 DAG nodes, got {len(results)}: "
-            f"{list(results.keys())}"
-        )
+        assert len(results) == 5, f"Expected results for all 5 DAG nodes, got {len(results)}: {list(results.keys())}"
 
         # Assert every node produced a non-empty result without exceptions
         for node_id, result in results.items():
             # If the result is an exception, the task failed
-            assert not isinstance(result, Exception), (
-                f"Task '{node_id}' raised an exception: {result}"
-            )
+            assert not isinstance(result, Exception), f"Task '{node_id}' raised an exception: {result}"
             # Assert the result is not None
-            assert result is not None, (
-                f"Task '{node_id}' produced None — expected a non-empty result"
-            )
+            assert result is not None, f"Task '{node_id}' produced None — expected a non-empty result"
 
     def test_data_loading_produces_correct_types(self, gfs_data, ish_lite_data):
         """Data loading stage produces correct types: xr.Dataset for GFS and
@@ -763,14 +704,11 @@ class TestPrefectE2E:
         import xarray as xr
 
         # Assert GFS result is an xarray Dataset
-        assert isinstance(gfs_data, xr.Dataset), (
-            f"Expected GFS data to be xr.Dataset, got {type(gfs_data).__name__}"
-        )
+        assert isinstance(gfs_data, xr.Dataset), f"Expected GFS data to be xr.Dataset, got {type(gfs_data).__name__}"
 
         # Assert ISH-Lite result is a pd.DataFrame or xr.Dataset
         assert isinstance(ish_lite_data, (pd.DataFrame, xr.Dataset)), (
-            f"Expected ISH-Lite data to be pd.DataFrame or xr.Dataset, "
-            f"got {type(ish_lite_data).__name__}"
+            f"Expected ISH-Lite data to be pd.DataFrame or xr.Dataset, got {type(ish_lite_data).__name__}"
         )
 
     def test_plotting_invoked_successfully(self, paired_data, tmp_path):
@@ -801,8 +739,7 @@ class TestPrefectE2E:
         # Assert a plot object is produced or a file is saved
         file_saved = Path(output_file).exists()
         assert result is not None or file_saved, (
-            "Expected either a plot object to be returned or a file to be saved at "
-            f"{output_file}, but got neither"
+            f"Expected either a plot object to be returned or a file to be saved at {output_file}, but got neither"
         )
 
     def test_pairing_produces_merged_dataset(self, paired_data):
@@ -821,21 +758,13 @@ class TestPrefectE2E:
         elif isinstance(paired_data, pd.DataFrame):
             all_names = list(paired_data.columns)
         else:
-            raise AssertionError(
-                f"Expected xr.Dataset or pd.DataFrame, got {type(paired_data).__name__}"
-            )
+            raise AssertionError(f"Expected xr.Dataset or pd.DataFrame, got {type(paired_data).__name__}")
 
         # Assert model variable is present
-        assert "TMP_2maboveground" in all_names, (
-            f"Expected model variable 'TMP_2maboveground' in paired output, "
-            f"got: {all_names}"
-        )
+        assert "TMP_2maboveground" in all_names, f"Expected model variable 'TMP_2maboveground' in paired output, got: {all_names}"
 
         # Assert observation variable is present
-        assert "t2m" in all_names, (
-            f"Expected observation variable 't2m' in paired output, "
-            f"got: {all_names}"
-        )
+        assert "t2m" in all_names, f"Expected observation variable 't2m' in paired output, got: {all_names}"
 
     def test_statistics_returns_metric_dict(self, paired_data):
         """Compute statistics on real paired data and verify the result contains
@@ -965,21 +894,16 @@ class TestCLIIntegration:
         Requirements: 5.3
         """
         result = subprocess.run(
-            [sys.executable, "-c",
-             "import sys; sys.argv = ['mdt', 'run', '/nonexistent/path.yaml']; "
-             "from mdt.cli import main; main()"],
+            [sys.executable, "-c", "import sys; sys.argv = ['mdt', 'run', '/nonexistent/path.yaml']; from mdt.cli import main; main()"],
             capture_output=True,
             text=True,
         )
 
         # Assert non-zero exit code
-        assert result.returncode != 0, (
-            f"Expected non-zero exit code for invalid config path, got {result.returncode}"
-        )
+        assert result.returncode != 0, f"Expected non-zero exit code for invalid config path, got {result.returncode}"
 
         # Assert an error message is present in stderr
         combined_output = result.stderr + result.stdout
         assert "error" in combined_output.lower() or "not found" in combined_output.lower(), (
-            f"Expected error message in output for invalid config path, "
-            f"got stdout={result.stdout!r}, stderr={result.stderr!r}"
+            f"Expected error message in output for invalid config path, got stdout={result.stdout!r}, stderr={result.stderr!r}"
         )

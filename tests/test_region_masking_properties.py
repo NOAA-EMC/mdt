@@ -5,12 +5,11 @@ from pathlib import Path
 
 import pytest
 import yaml
-from hypothesis import given, settings, assume
+from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
 from mdt.config import ConfigParser
 from mdt.dag import DAGBuilder
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -234,7 +233,8 @@ class TestDAGRegionsPreservationProperty:
     def test_plot_node_preserves_regions(self, regions):
         """For any list of region name strings in a plot task's kwargs, the DAGBuilder
         stores an identical list (same elements, same order) as a top-level 'regions'
-        attribute on the corresponding plot node."""
+        attribute on the corresponding plot node.
+        """
         config = _DummyConfig()
         config.plots = {
             "my_plot": {
@@ -249,17 +249,15 @@ class TestDAGRegionsPreservationProperty:
 
         node = dag.nodes["plot_my_plot"]
         assert "regions" in node, "Plot node should have a 'regions' attribute"
-        assert node["regions"] == regions, (
-            f"Plot node regions should match input exactly. "
-            f"Expected {regions!r}, got {node['regions']!r}"
-        )
+        assert node["regions"] == regions, f"Plot node regions should match input exactly. Expected {regions!r}, got {node['regions']!r}"
 
     @given(regions=st.lists(st.text(min_size=1).filter(lambda s: s.strip() != ""), min_size=1, max_size=10))
     @settings(max_examples=100)
     def test_statistics_node_preserves_regions(self, regions):
         """For any list of region name strings in a statistics task's kwargs, the DAGBuilder
         stores an identical list (same elements, same order) as a top-level 'regions'
-        attribute on the corresponding statistics node."""
+        attribute on the corresponding statistics node.
+        """
         config = _DummyConfig()
         config.statistics = {
             "my_stats": {
@@ -274,19 +272,17 @@ class TestDAGRegionsPreservationProperty:
 
         node = dag.nodes["stats_my_stats"]
         assert "regions" in node, "Statistics node should have a 'regions' attribute"
-        assert node["regions"] == regions, (
-            f"Statistics node regions should match input exactly. "
-            f"Expected {regions!r}, got {node['regions']!r}"
-        )
+        assert node["regions"] == regions, f"Statistics node regions should match input exactly. Expected {regions!r}, got {node['regions']!r}"
 
 
 # ---------------------------------------------------------------------------
 # Feature: region-masking, Property 7: Radar metrics are within defined mathematical bounds
 # ---------------------------------------------------------------------------
 
-import numpy as np
-import sys
 import os
+import sys
+
+import numpy as np
 
 # Add the scripts directory to path so we can import the compute_radar_metrics function
 # from the patch source directly (the function is defined in the RADAR_SOURCE string
@@ -313,9 +309,7 @@ except ImportError:
 # - Non-zero variance (not all identical)
 _finite_float = st.floats(min_value=-1e6, max_value=1e6, allow_nan=False, allow_infinity=False)
 
-_numeric_array = st.lists(_finite_float, min_size=2, max_size=50).filter(
-    lambda xs: np.std(xs, ddof=1) > 0
-)
+_numeric_array = st.lists(_finite_float, min_size=2, max_size=50).filter(lambda xs: np.std(xs, ddof=1) > 0)
 
 
 class TestRadarMetricsBoundsProperty:
@@ -334,7 +328,8 @@ class TestRadarMetricsBoundsProperty:
     @settings(max_examples=100)
     def test_radar_metrics_bounds(self, obs, pred):
         """For any pair of observed and predicted arrays with at least 2 valid points
-        and non-zero variance, IOA is in [0,1], KGE <= 1, and CCC is in [-1,1]."""
+        and non-zero variance, IOA is in [0,1], KGE <= 1, and CCC is in [-1,1].
+        """
         # Ensure both arrays are the same length (use the shorter length)
         min_len = min(len(obs), len(pred))
         assume(min_len >= 2)
@@ -446,7 +441,8 @@ class TestRegionFilteringProperty:
     @settings(max_examples=100)
     def test_region_filter_preserves_only_matching(self, data):
         """Filtering by a region that exists in the dataset produces a subset
-        containing only data points with that region label."""
+        containing only data points with that region label.
+        """
         ds, region_var, region_labels = data
 
         # Pick a region that exists in the dataset
@@ -465,22 +461,19 @@ class TestRegionFilteringProperty:
         # Property: every data point in the filtered result has the target region label
         filtered_labels = filtered[region_var].values
         for label in filtered_labels:
-            assert label == target_region, (
-                f"Expected all labels to be '{target_region}', but found '{label}'"
-            )
+            assert label == target_region, f"Expected all labels to be '{target_region}', but found '{label}'"
 
         # Property: no data points with other region labels are present
         other_labels = present_labels - {target_region}
         for label in filtered_labels:
-            assert label not in other_labels, (
-                f"Found label '{label}' from another region in filtered result"
-            )
+            assert label not in other_labels, f"Found label '{label}' from another region in filtered result"
 
     @given(data=_dataset_with_regions())
     @settings(max_examples=100)
     def test_region_filter_count_matches_original(self, data):
         """The number of points in the filtered result equals the number of
-        points with that region label in the original dataset."""
+        points with that region label in the original dataset.
+        """
         ds, region_var, region_labels = data
 
         present_labels = set(ds[region_var].values)
@@ -496,8 +489,7 @@ class TestRegionFilteringProperty:
 
         # The filtered dataset should have exactly that many points
         assert filtered.sizes["obs"] == original_count, (
-            f"Expected {original_count} points for region '{target_region}', "
-            f"got {filtered.sizes['obs']}"
+            f"Expected {original_count} points for region '{target_region}', got {filtered.sizes['obs']}"
         )
 
 
@@ -522,7 +514,8 @@ class TestPlotFilePathSanitizationProperty:
     @settings(max_examples=100)
     def test_sanitized_name_contains_only_safe_characters(self, region_name):
         """For any string used as a region name, the sanitized result contains only
-        alphanumeric characters, hyphens, periods, and underscores (the replacement char)."""
+        alphanumeric characters, hyphens, periods, and underscores (the replacement char).
+        """
         sanitized = _sanitize_region_name(region_name)
 
         import re as _re
@@ -530,44 +523,37 @@ class TestPlotFilePathSanitizationProperty:
         # Every character in the result must be alphanumeric, hyphen, period, or underscore
         # (underscore is the replacement character for unsafe chars)
         assert _re.fullmatch(r"[a-zA-Z0-9\-._]*", sanitized) is not None, (
-            f"Sanitized name {sanitized!r} contains characters outside "
-            f"[a-zA-Z0-9\\-._ ]"
+            f"Sanitized name {sanitized!r} contains characters outside [a-zA-Z0-9\\-._ ]"
         )
 
     @given(region_name=st.text(min_size=0, max_size=200))
     @settings(max_examples=100)
     def test_safe_characters_preserved(self, region_name):
         """Characters that are already safe (alphanumeric, hyphens, periods) are
-        preserved in their original positions."""
+        preserved in their original positions.
+        """
         sanitized = _sanitize_region_name(region_name)
 
         import re as _re
 
         # The sanitized string must have the same length as the input
-        assert len(sanitized) == len(region_name), (
-            f"Sanitized length {len(sanitized)} != input length {len(region_name)}"
-        )
+        assert len(sanitized) == len(region_name), f"Sanitized length {len(sanitized)} != input length {len(region_name)}"
 
         # Each safe character in the input must appear unchanged at the same position
         for i, ch in enumerate(region_name):
             if _re.match(r"[a-zA-Z0-9\-.]", ch):
-                assert sanitized[i] == ch, (
-                    f"Safe character {ch!r} at position {i} was changed to "
-                    f"{sanitized[i]!r}"
-                )
+                assert sanitized[i] == ch, f"Safe character {ch!r} at position {i} was changed to {sanitized[i]!r}"
 
     @given(region_name=st.text(min_size=0, max_size=200))
     @settings(max_examples=100)
     def test_unsafe_characters_replaced_with_underscore(self, region_name):
         """Characters that are not alphanumeric, hyphens, or periods are replaced
-        with underscores."""
+        with underscores.
+        """
         sanitized = _sanitize_region_name(region_name)
 
         import re as _re
 
         for i, ch in enumerate(region_name):
             if not _re.match(r"[a-zA-Z0-9\-.]", ch):
-                assert sanitized[i] == "_", (
-                    f"Unsafe character {ch!r} at position {i} was not replaced "
-                    f"with underscore, got {sanitized[i]!r}"
-                )
+                assert sanitized[i] == "_", f"Unsafe character {ch!r} at position {i} was not replaced with underscore, got {sanitized[i]!r}"

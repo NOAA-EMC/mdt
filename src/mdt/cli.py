@@ -79,6 +79,7 @@ def main() -> None:
 
             # Force clean shutdown to avoid segfault from Prefect server threads
             import os
+
             os._exit(0)
 
         except Exception as e:

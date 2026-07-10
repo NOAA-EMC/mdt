@@ -35,8 +35,10 @@ class DAGBuilder:
         self._add_data_nodes()
         self._add_pairing_nodes()
         self._add_combine_nodes()
+        self._add_reduction_nodes()
         self._add_statistics_nodes()
         self._add_plotting_nodes()
+        self._add_save_nodes()
 
         # Validate that the graph is indeed a DAG
         if not nx.is_directed_acyclic_graph(self.graph):
@@ -73,11 +75,32 @@ class DAGBuilder:
 
             zarr_store = details.get("zarr_store", {})
             if zarr_store.get("enabled", False):
-                kwargs["use_virtualizarr"] = True
-                kwargs["virtualizarr_backend"] = zarr_store.get("backend", "kerchunk_json")
-                kwargs["store_path"] = zarr_store.get("store_path", f"./zarr_stores/{name}/")
-                if zarr_store.get("icechunk_repo"):
-                    kwargs["icechunk_repo"] = zarr_store["icechunk_repo"]
+                backend = zarr_store.get("backend", "kerchunk_json")
+                if backend == "icechunk":
+                    kwargs["use_icechunk"] = True
+                    icechunk_url = zarr_store.get("icechunk_url") or zarr_store.get("icechunk_repo")
+                    if icechunk_url:
+                        kwargs["icechunk_url"] = icechunk_url
+                else:
+                    kwargs["use_virtualizarr"] = True
+                    kwargs["virtualizarr_backend"] = backend
+                    kwargs["store_path"] = zarr_store.get("store_path", f"./zarr_stores/{name}/")
+
+                # Pass through robustness parameters if present
+                for param in ["max_scan_attempts", "network_timeout", "max_concurrent_requests"]:
+                    if param in zarr_store:
+                        kwargs[param] = zarr_store[param]
+
+                # Support loading existing Zarr/Icechunk stores
+                if zarr_store.get("existing", False):
+                    kwargs["existing_zarr"] = True
+
+                if "zarr_kwargs" in zarr_store:
+                    kwargs["zarr_kwargs"] = zarr_store["zarr_kwargs"]
+
+            # Support explicit bypass / existing flags at the data source level
+            if details.get("existing", False) or details.get("bypass_load", False):
+                kwargs["existing_zarr"] = True
 
             target_cluster = details.get("cluster", default_cluster)
             logger.debug(f"Adding data node: {node_id} (type={dataset_type}, cluster={target_cluster})")
@@ -108,7 +131,7 @@ class DAGBuilder:
             The node ID if found, else None.
         """
         # Search in reverse order to prioritize downstream/processed nodes
-        prefixes = ["plot", "stats", "combine", "pair", "load"]
+        prefixes = ["plot", "stats", "combine", "pair", "reduction", "save", "load"]
         for p in prefixes:
             node_id = f"{p}_{name}"
             if node_id in self.graph:
@@ -289,6 +312,90 @@ class DAGBuilder:
             if regions:
                 node_attrs["regions"] = list(regions)
             self.graph.add_node(node_id, **node_attrs)
+
+            logger.debug(f"Adding edge: {target_parent} -> {node_id}")
+            self.graph.add_edge(target_parent, node_id)
+
+    def _add_reduction_nodes(self) -> None:
+        """Adds nodes for calculating data reductions (e.g. mean along dimensions)."""
+        reduction_cfg = self.config.reductions
+        if not reduction_cfg:
+            return
+
+        default_cluster = self.config.execution.get("default_cluster", "compute")
+
+        for name, details in reduction_cfg.items():
+            node_id = f"reduction_{name}"
+            input_data = details.get("input")
+
+            if not input_data:
+                logger.warning(f"Reduction task '{name}' is missing 'input'. Skipping.")
+                continue
+
+            target_parent = self._find_node(input_data)
+
+            if not target_parent:
+                logger.error(f"Input '{input_data}' for reduction '{name}' not found. Skipping reduction.")
+                continue
+
+            target_cluster = details.get("cluster", default_cluster)
+            method = details.get("method", "mean")
+            dim = details.get("dim")
+            force_weighted = details.get("force_weighted", False)
+            kwargs = details.get("kwargs", {})
+
+            logger.debug(f"Adding reduction node: {node_id} (input={target_parent}, cluster={target_cluster})")
+            self.graph.add_node(
+                node_id,
+                task_type="calculate_reduction",
+                name=name,
+                method=method,
+                dim=dim,
+                force_weighted=force_weighted,
+                cluster=target_cluster,
+                kwargs=kwargs,
+            )
+
+            logger.debug(f"Adding edge: {target_parent} -> {node_id}")
+            self.graph.add_edge(target_parent, node_id)
+
+    def _add_save_nodes(self) -> None:
+        """Adds nodes for saving/writing datasets to Zarr or Icechunk."""
+        save_cfg = self.config.save
+        if not save_cfg:
+            return
+
+        default_cluster = self.config.execution.get("default_cluster", "compute")
+
+        for name, details in save_cfg.items():
+            node_id = f"save_{name}"
+            input_data = details.get("input")
+
+            if not input_data:
+                logger.warning(f"Save task '{name}' is missing 'input'. Skipping.")
+                continue
+
+            target_parent = self._find_node(input_data)
+
+            if not target_parent:
+                logger.error(f"Input '{input_data}' for save '{name}' not found. Skipping save.")
+                continue
+
+            target_cluster = details.get("cluster", default_cluster)
+            backend = details.get("backend")
+            url = details.get("url")
+            kwargs = details.get("kwargs", {})
+
+            logger.debug(f"Adding save node: {node_id} (input={target_parent}, cluster={target_cluster})")
+            self.graph.add_node(
+                node_id,
+                task_type="save_data",
+                name=name,
+                backend=backend,
+                url=url,
+                cluster=target_cluster,
+                kwargs=kwargs,
+            )
 
             logger.debug(f"Adding edge: {target_parent} -> {node_id}")
             self.graph.add_edge(target_parent, node_id)

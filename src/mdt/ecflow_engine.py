@@ -9,7 +9,6 @@ loaded without ecFlow installed.
 
 import json
 import logging
-import os
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List
@@ -30,6 +29,8 @@ _FAMILY_MAP: dict[str, str] = {
     "combine_paired_data": "combine",
     "compute_statistics": "statistics",
     "generate_plot": "plot",
+    "calculate_reduction": "reduction",
+    "save_data": "save",
 }
 
 
@@ -39,14 +40,18 @@ _DISPATCH_BLOCKS: dict[str, str] = {
     "load_data": (
         "    zarr_enabled = '%ZARR_STORE_ENABLED%'\n"
         "    if zarr_enabled == 'true':\n"
-        "        kwargs['use_virtualizarr'] = True\n"
-        "        kwargs['virtualizarr_backend'] = '%ZARR_STORE_BACKEND%'\n"
+        "        zarr_backend = '%ZARR_STORE_BACKEND%'\n"
+        "        if zarr_backend == 'icechunk':\n"
+        "            kwargs['use_icechunk'] = True\n"
+        "        else:\n"
+        "            kwargs['use_virtualizarr'] = True\n"
+        "            kwargs['virtualizarr_backend'] = zarr_backend\n"
         "        zarr_path = '%ZARR_STORE_PATH%'\n"
-        "        if zarr_path:\n"
+        "        if zarr_path and zarr_backend != 'icechunk':\n"
         "            kwargs['store_path'] = zarr_path\n"
-        "        icechunk_repo = '%ZARR_STORE_ICECHUNK_REPO%'\n"
-        "        if icechunk_repo:\n"
-        "            kwargs['icechunk_repo'] = icechunk_repo\n"
+        "        icechunk_url = '%ZARR_STORE_ICECHUNK_URL%'\n"
+        "        if icechunk_url:\n"
+        "            kwargs['icechunk_url'] = icechunk_url\n"
         "    from mdt.tasks.data import load_data\n"
         "    load_data(name=task_name, dataset_type=dataset_type, kwargs=kwargs)"
     ),
@@ -71,6 +76,15 @@ _DISPATCH_BLOCKS: dict[str, str] = {
         "    from mdt.tasks.plotting import generate_plot\n"
         "    generate_plot(name=task_name, plot_type=plot_type,\n"
         "                  input_data=None, kwargs=kwargs)"
+    ),
+    "calculate_reduction": (
+        "    from mdt.tasks.reductions import calculate_reduction\n"
+        "    calculate_reduction(obj=None, method=method, dim=dim,\n"
+        "                        force_weighted=force_weighted, **kwargs)"
+    ),
+    "save_data": (
+        "    from mdt.tasks.data import save_data\n"
+        "    save_data(name=task_name, data=None, backend=backend, url=url, kwargs=kwargs)"
     ),
 }
 
@@ -220,7 +234,7 @@ class EcFlowEngine(Engine):
 
         # Let ecFlow resolve scripts from task_script_dir/<suite>/<family>/<task>.ecf
         # regardless of server ECF_HOME location.
-        suite.add_variable("ECF_FILES", os.path.abspath(self.task_script_dir))
+        suite.add_variable("ECF_FILES", str(Path(self.task_script_dir).resolve()))
 
         # Create one family per task type.
         families: dict[str, Any] = {}
@@ -251,15 +265,18 @@ class EcFlowEngine(Engine):
             task_node.add_variable("PLOT_TYPE", data.get("plot_type") or "")
             task_node.add_variable("METHOD", data.get("method") or "")
             task_node.add_variable("DIM", data.get("dim") or "")
+            task_node.add_variable("FORCE_WEIGHTED", str(data.get("force_weighted") or "").lower())
             task_node.add_variable("SOURCES", json.dumps(data.get("sources") or []))
             task_node.add_variable("CLUSTER", data.get("cluster") or "")
+            task_node.add_variable("BACKEND", data.get("backend") or "")
+            task_node.add_variable("URL", data.get("url") or "")
 
             # Always define ZARR_* so ecFlow token substitution succeeds for all
             # generated wrappers, even for non-load tasks.
             task_node.add_variable("ZARR_STORE_ENABLED", "false")
             task_node.add_variable("ZARR_STORE_BACKEND", "")
             task_node.add_variable("ZARR_STORE_PATH", "")
-            task_node.add_variable("ZARR_STORE_ICECHUNK_REPO", "")
+            task_node.add_variable("ZARR_STORE_ICECHUNK_URL", "")
 
             if task_type == "load_data":
                 node_kwargs = data.get("kwargs") or {}
@@ -269,15 +286,15 @@ class EcFlowEngine(Engine):
                 )
                 task_node.add_variable(
                     "ZARR_STORE_BACKEND",
-                    node_kwargs.get("virtualizarr_backend", ""),
+                    "icechunk" if node_kwargs.get("use_icechunk", False) else node_kwargs.get("virtualizarr_backend", ""),
                 )
                 task_node.add_variable(
                     "ZARR_STORE_PATH",
                     node_kwargs.get("store_path", ""),
                 )
                 task_node.add_variable(
-                    "ZARR_STORE_ICECHUNK_REPO",
-                    node_kwargs.get("icechunk_repo", ""),
+                    "ZARR_STORE_ICECHUNK_URL",
+                    node_kwargs.get("icechunk_url", ""),
                 )
 
         # --- trigger expressions from DAG edges ---
@@ -286,10 +303,7 @@ class EcFlowEngine(Engine):
             if not predecessors:
                 continue
 
-            parts = [
-                f"/{self.suite_name}/{node_family[pred]}/{pred} == complete"
-                for pred in sorted(predecessors)
-            ]
+            parts = [f"/{self.suite_name}/{node_family[pred]}/{pred} == complete" for pred in sorted(predecessors)]
             trigger_expr = " and ".join(parts)
             node_tasks[node_id].add_trigger(trigger_expr)
 

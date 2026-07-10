@@ -23,7 +23,7 @@ sys.modules["prefect_dask.task_runners"] = prefect_dask_task_runners_mock
 # Don't mock dask at module level as it breaks xarray
 # Instead, we will patch what we need inside the tests
 
-from mdt.engine import PrefectEngine  # noqa: E402
+from mdt.engine import PrefectEngine
 
 
 class TestPrefectVirtualiZarrIntegration:

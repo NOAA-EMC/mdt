@@ -1,5 +1,6 @@
 import inspect
 import logging
+from pathlib import Path
 from typing import Any, Dict, List, Union, cast
 
 import pandas as pd
@@ -66,10 +67,7 @@ def compute_statistics(
     if regions:
         savename_template = kwargs.get("savename", "")
         if "{region}" not in savename_template:
-            raise ValueError(
-                f"Statistics '{name}': savename must contain '{{region}}' placeholder "
-                f"when regions are specified."
-            )
+            raise ValueError(f"Statistics '{name}': savename must contain '{{region}}' placeholder when regions are specified.")
         region_var = _find_region_variable(input_data)
         all_results = {}
         for region in regions:
@@ -372,6 +370,6 @@ def _save_statistics(name: str, results: Dict[str, Any], savename: str) -> None:
         md += "| Metric | Value |\n|--------|-------|\n"
         for metric, value in rows.items():
             md += f"| {metric} | {value:.4f} |\n"
-        with open(savename, "w") as f:
+        with Path(savename).open("w") as f:
             f.write(md)
         logger.info("Saved statistics to %s (Markdown)", savename)

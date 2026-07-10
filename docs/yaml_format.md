@@ -28,9 +28,14 @@ The `data` section defines the sources of information for your verification.
 MDT supports virtualizing large datasets to enable efficient, random access without needing to convert the original files to Zarr. This is particularly useful for large model outputs stored in NetCDF or GRIB format.
 
 *   **`enabled`**: Set to `true` to enable virtualization.
-*   **`backend`**: The virtualization engine to use (`kerchunk_json`, `kerchunk_parquet`, or `icechunk`).
-*   **`store_path`**: The local or cloud path where the virtual index will be stored.
-*   **`icechunk_repo`**: (Required for `icechunk`) The path to the Icechunk repository.
+*   **`backend`**: The virtualization engine to use (`kerchunk_json`, `kerchunk_parquet`, `icechunk`, or `zarr`).
+*   **`store_path`**: The local or cloud path where the virtual index or Zarr store is located.
+*   **`icechunk_url`**: (Required for `icechunk`) The path/URL to the Icechunk repository. This is user/environment specific (do not copy example values literally). Legacy key `icechunk_repo` is still accepted for backward compatibility.
+*   **`existing`**: (Optional) If `true`, MDT will attempt to load an existing Zarr or Icechunk store directly instead of generating virtual references.
+*   **`zarr_kwargs`**: (Optional) Additional keyword arguments passed to `xarray.open_zarr`.
+*   **`max_scan_attempts`**: (Optional) Number of retry attempts when scanning GRIB2 files (default: reader-specific).
+*   **`network_timeout`**: (Optional) Network timeout in seconds for remote requests.
+*   **`max_concurrent_requests`**: (Optional) Maximum number of concurrent network requests for parallel scanning.
 
 ```yaml
 data:
@@ -52,7 +57,16 @@ data:
     zarr_store:
       enabled: true
       backend: "icechunk"
-      icechunk_repo: "s3://my-bucket/gefs-repo"
+      icechunk_url: "s3://<your-bucket>/<your-gefs-icechunk-repo>"
+
+  # Example pointing to an existing Zarr store (e.g. preprocessed AERONET)
+  aeronet_zarr:
+    type: "aeronet"  # Type still required by schema
+    zarr_store:
+      enabled: true
+      backend: "zarr"
+      existing: true
+      store_path: "s3://my-bucket/aeronet-zarr"
 ```
 
 ---

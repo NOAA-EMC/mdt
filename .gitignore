@@ -164,3 +164,4 @@ cython_debug/
 
 # ESMF log files
 PET*.ESMF_LogFile
+**/zarr_stores

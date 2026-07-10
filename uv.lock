@@ -1686,8 +1686,8 @@ requires-dist = [
     { name = "mdt", extras = ["dev"], marker = "extra == 'all'" },
     { name = "mdt", extras = ["prefect"], marker = "extra == 'all'" },
     { name = "monet", git = "https://github.com/bbakernoaa/monet.git?rev=feature%2Finterp_improvements" },
-    { name = "monet-plots", git = "https://github.com/bbakernoaa/monet-plots.git" },
-    { name = "monet-stats", git = "https://github.com/noaa-oar-arl/monet-stats" },
+    { name = "monet-plots", git = "https://github.com/bbakernoaa/monet-plots.git?rev=feature%2Fmdt" },
+    { name = "monet-stats", git = "https://github.com/noaa-oar-arl/monet-stats.git" },
     { name = "monetio", git = "https://github.com/bbakernoaa/monetio.git?rev=develop" },
     { name = "networkx" },
     { name = "numpy" },
@@ -1736,7 +1736,7 @@ dependencies = [
 [[package]]
 name = "monet-plots"
 version = "0.1.0"
-source = { git = "https://github.com/bbakernoaa/monet-plots.git#4373d847c7936af5cdeeb0b91d795abab6106df8" }
+source = { git = "https://github.com/bbakernoaa/monet-plots.git?rev=feature%2Fmdt#d116a63fbe61cf2856b955bf527701629fe26d15" }
 dependencies = [
     { name = "cartopy" },
     { name = "dask" },
@@ -1754,7 +1754,7 @@ dependencies = [
 [[package]]
 name = "monet-stats"
 version = "1.0.0"
-source = { git = "https://github.com/noaa-oar-arl/monet-stats#a68a259df08dd9a770983e7754caa39f2797bf60" }
+source = { git = "https://github.com/noaa-oar-arl/monet-stats.git#a68a259df08dd9a770983e7754caa39f2797bf60" }
 dependencies = [
     { name = "numpy" },
     { name = "pandas" },

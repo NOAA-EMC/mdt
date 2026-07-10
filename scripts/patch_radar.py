@@ -15,7 +15,7 @@ import os
 import sys
 
 
-def get_radar_path():
+def get_radar_path() -> str:
     """Locate the monet_plots/plots/ directory via the installed package."""
     try:
         import monet_plots
@@ -31,7 +31,7 @@ def get_radar_path():
     return os.path.join(plots_dir, "radar.py")
 
 
-def is_already_patched(radar_path):
+def is_already_patched(radar_path: str) -> bool:
     """Check if IOA/KGE/CCC metrics already exist in the radar module."""
     if not os.path.exists(radar_path):
         return False
@@ -237,7 +237,7 @@ class RadarPlot(BasePlot):
 '''
 
 
-def apply_patch():
+def apply_patch() -> None:
     """Create or update the radar.py module in monet_plots."""
     radar_path = get_radar_path()
 

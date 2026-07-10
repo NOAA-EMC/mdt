@@ -31,7 +31,7 @@ def is_already_patched(content: str) -> bool:
     return bool(re.search(pattern, content))
 
 
-def apply_patch():
+def apply_patch() -> None:
     """Apply the self.y assignment patch to ScatterPlot.__init__."""
     source_path = get_scatter_source_path()
     print(f"ScatterPlot source: {source_path}")
