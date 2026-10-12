@@ -1,10 +1,13 @@
 import logging
 import re
+from functools import lru_cache
 from typing import Any, Dict, Union, cast
 
 import numpy as np
 import pandas as pd
 import xarray as xr
+
+from mdt.utils import to_xarray
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +38,7 @@ def _filter_by_region(data: xr.Dataset, region_var: str, region_name: str) -> xr
     return data.where(mask, drop=True)
 
 
-def _is_empty(data: Union[xr.Dataset, xr.DataArray, pd.DataFrame]) -> bool:
+def _is_empty(data: Union[xr.Dataset, xr.DataArray]) -> bool:
     """Check if filtered dataset has no data points."""
     if isinstance(data, xr.Dataset):
         for var in data.data_vars:
@@ -45,7 +48,7 @@ def _is_empty(data: Union[xr.Dataset, xr.DataArray, pd.DataFrame]) -> bool:
     return len(data) == 0
 
 
-def _format_time_range(data: Union[xr.Dataset, xr.DataArray, pd.DataFrame, Dict[str, Any]]) -> str | None:
+def _format_time_range(data: Union[xr.Dataset, xr.DataArray, Dict[str, Any]]) -> str | None:
     """Extract and format a time range from common dataset types."""
     times = None
 
@@ -54,12 +57,6 @@ def _format_time_range(data: Union[xr.Dataset, xr.DataArray, pd.DataFrame, Dict[
             times = pd.to_datetime(data["time"].values, errors="coerce")
         elif "time" in data.dims:
             times = pd.to_datetime(data["time"].values, errors="coerce")
-    elif isinstance(data, pd.DataFrame):
-        for col in ("time", "valid_time", "date", "datetime"):
-            if col in data.columns:
-                times = pd.to_datetime(data[col], errors="coerce")
-                break
-
     if times is None:
         return None
 
@@ -105,7 +102,7 @@ def _promote_constructor_kwargs(
 
 
 def _extract_pair_values(
-    data: Union[xr.Dataset, xr.DataArray, pd.DataFrame, Dict[str, Any]], col1: str, col2: str
+    data: Union[xr.Dataset, xr.DataArray, Dict[str, Any]], col1: str, col2: str
 ) -> tuple[np.ndarray | None, np.ndarray | None]:
     """Extract paired finite arrays for global metric calculation."""
     a = None
@@ -114,10 +111,6 @@ def _extract_pair_values(
     if isinstance(data, xr.Dataset) and col1 in data and col2 in data:
         a = np.asarray(data[col1].values).ravel()
         b = np.asarray(data[col2].values).ravel()
-    elif isinstance(data, pd.DataFrame) and col1 in data.columns and col2 in data.columns:
-        a = data[col1].to_numpy(dtype=float)
-        b = data[col2].to_numpy(dtype=float)
-
     if a is None or b is None:
         return None, None
 
@@ -125,6 +118,29 @@ def _extract_pair_values(
     if not np.any(mask):
         return None, None
     return a[mask], b[mask]
+
+
+def _compute_xarray_global_stat(data: xr.Dataset, col1: str, col2: str, stat_name: str) -> float | None:
+    """Reduce paired xarray variables lazily and materialize only the scalar result."""
+    if col1 not in data or col2 not in data:
+        return None
+    a, b = data[col1], data[col2]
+    valid = np.isfinite(a) & np.isfinite(b)
+    a, b = a.where(valid), b.where(valid)
+    diff = b - a
+    stat = stat_name.lower()
+    if stat == "rmse":
+        result = np.sqrt((diff**2).mean(skipna=True))
+    elif stat in ("mb", "bias", "mean_bias"):
+        result = diff.mean(skipna=True)
+    elif stat == "mae":
+        result = np.abs(diff).mean(skipna=True)
+    elif stat in ("r", "corr", "correlation"):
+        result = xr.corr(a, b)
+    else:
+        return None
+    value = result.compute().item()
+    return float(value) if np.isfinite(value) else None
 
 
 def _compute_global_stat(a: np.ndarray, b: np.ndarray, stat_name: str) -> float | None:
@@ -152,7 +168,7 @@ def _compute_global_stat(a: np.ndarray, b: np.ndarray, stat_name: str) -> float 
 def _build_plot_title(
     name: str,
     plot_type: str,
-    data: Union[xr.Dataset, xr.DataArray, pd.DataFrame, Dict[str, Any]],
+    data: Union[xr.Dataset, xr.DataArray, Dict[str, Any]],
     plot_kwargs: Dict[str, Any],
     title_main: str | None,
     requested_global_stat: str | None,
@@ -176,15 +192,17 @@ def _build_plot_title(
         elif "bias" in plot_type.lower():
             stat_name = "mb"
         else:
-            stat_name = "rmse"
+            stat_name = None
 
     stat_text = None
     if stat_name and col1 and col2:
-        a, b = _extract_pair_values(data, str(col1), str(col2))
-        if a is not None and b is not None:
-            value = _compute_global_stat(a, b, str(stat_name))
-            if value is not None and np.isfinite(value):
-                stat_text = f"{str(stat_name).upper()}={value:.3f}"
+        if isinstance(data, xr.Dataset):
+            value = _compute_xarray_global_stat(data, str(col1), str(col2), str(stat_name))
+        else:
+            a, b = _extract_pair_values(data, str(col1), str(col2))
+            value = _compute_global_stat(a, b, str(stat_name)) if a is not None and b is not None else None
+        if value is not None and np.isfinite(value):
+            stat_text = f"{str(stat_name).upper()}={value:.3f}"
 
     pieces = [main]
     if time_range:
@@ -198,7 +216,7 @@ def _build_plot_title(
 def generate_plot(
     name: str,
     plot_type: str,
-    input_data: Union[xr.Dataset, xr.DataArray, pd.DataFrame, Dict[str, Any]],
+    input_data: Union[xr.Dataset, xr.DataArray, Dict[str, Any]],
     kwargs: Dict[str, Any],
     track: str = "A",
 ) -> Any:
@@ -217,7 +235,7 @@ def generate_plot(
         The identifier for this plotting task.
     plot_type : str
         The type of plot to generate (e.g., 'spatial', 'scatter', 'timeseries').
-    input_data : xarray.Dataset, xarray.DataArray, pandas.DataFrame, or dict
+    input_data : xarray.Dataset, xarray.DataArray, or dict of xarray objects
         The data to plot.
     kwargs : dict
         Additional keyword arguments to pass to the plotting function.
@@ -234,6 +252,14 @@ def generate_plot(
     --------
     >>> fig = generate_plot("my_plot", "spatial", ds, {"savename": "spatial.png"}, track="A")
     """
+    def normalize(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {key: normalize(item) for key, item in value.items()}
+        if isinstance(value, (xr.Dataset, xr.DataArray, pd.DataFrame, pd.Series)):
+            return to_xarray(value)
+        return value
+
+    input_data = normalize(input_data)
     regions = kwargs.pop("regions", None)
 
     if regions:
@@ -259,7 +285,7 @@ def generate_plot(
 def _generate_single_plot(
     name: str,
     plot_type: str,
-    input_data: Union[xr.Dataset, xr.DataArray, pd.DataFrame, Dict[str, Any]],
+    input_data: Union[xr.Dataset, xr.DataArray, Dict[str, Any]],
     kwargs: Dict[str, Any],
     track: str = "A",
 ) -> Any:
@@ -267,7 +293,7 @@ def _generate_single_plot(
     logger.info("Generating plot '%s' [Track %s] of type: %s", name, track, plot_type)
 
     if isinstance(input_data, dict):
-        typed_values = [v for v in input_data.values() if isinstance(v, (xr.Dataset, xr.DataArray, pd.DataFrame))]
+        typed_values = [v for v in input_data.values() if isinstance(v, (xr.Dataset, xr.DataArray))]
         if len(typed_values) == 1:
             input_data = typed_values[0]
 
@@ -279,11 +305,28 @@ def _generate_single_plot(
         raise ValueError(f"Unknown track '{track}'. Use 'A' (Static) or 'B' (Interactive).")
 
 
+@lru_cache(maxsize=1)
+def _load_plot_modules() -> None:
+    """Import monet_plots plot modules once per process."""
+    import importlib
+    import pkgutil
+
+    try:
+        import monet_plots.plots as m_plots
+        for _, module_name, _ in pkgutil.iter_modules(m_plots.__path__):
+            try:
+                importlib.import_module(f"monet_plots.plots.{module_name}")
+            except Exception:
+                logger.debug("Could not import monet_plots plot module %s", module_name, exc_info=True)
+    except Exception:
+        logger.warning("Could not dynamically import monet_plots submodules", exc_info=True)
+
+
 def _find_plot_class(plot_type: str) -> Any:
     """
     Dynamically discover any plot class in monet_plots based on plot_type.
 
-    Supports both case-insensitive, dash/underscore flexible matches, and 
+    Supports both case-insensitive, dash/underscore flexible matches, and
     automatically walks all monet_plots.plots submodules to register new plot
     classes on-the-fly.
 
@@ -302,21 +345,11 @@ def _find_plot_class(plot_type: str) -> Any:
     ValueError
         If no matching plot class is found.
     """
-    import pkgutil
-    import importlib
     import sys
+
     import monet_plots
 
-    # 1. Dynamically import all submodules under monet_plots.plots
-    try:
-        import monet_plots.plots as m_plots
-        for _, module_name, _ in pkgutil.iter_modules(m_plots.__path__):
-            try:
-                importlib.import_module(f"monet_plots.plots.{module_name}")
-            except Exception:
-                pass
-    except Exception as e:
-        logger.warning("Could not dynamically import monet_plots submodules: %s", e)
+    _load_plot_modules()
 
     # 2. Search for the class inside all loaded monet_plots.plots submodules
     # Standardize types and attributes to be alphanumeric-only for maximum naming flexibility
@@ -374,7 +407,7 @@ def _find_plot_class(plot_type: str) -> Any:
 def _generate_static_plot(
     name: str,
     plot_type: str,
-    input_data: Union[xr.Dataset, xr.DataArray, pd.DataFrame, Dict[str, Any]],
+    input_data: Union[xr.Dataset, xr.DataArray, Dict[str, Any]],
     kwargs: Dict[str, Any],
 ) -> Any:
     """Track A: Static plotting with monet-plots (Matplotlib + Cartopy)."""
@@ -420,7 +453,7 @@ def _generate_static_plot(
                 import xarray as xr
                 var2_val = kwargs.get("var2", "press")
                 first_col, first_label, first_color = columns_spec[0]
-                
+
                 plot_data = data
                 # Preserve 1D vertical sounding coordinates and variables before taking temporal mean over valid_time
                 preserved_vars = {}
@@ -434,7 +467,7 @@ def _generate_static_plot(
 
                 if "valid_time" in plot_data.dims:
                     plot_data = plot_data.mean(dim="valid_time", skipna=True)
-                
+
                 # Re-assign preserved variables and coordinates
                 for c, val in preserved_vars.items():
                     if c in plot_data.coords:
@@ -460,12 +493,12 @@ def _generate_static_plot(
                                 if dim in plot_data[col].dims:
                                     vertical_dim = dim
                                     break
-                            
+
                             if vertical_dim is not None:
                                 try:
                                     gfs_vals = plot_data[vertical_dim].values
                                     igra_vals = target_press.values
-                                    
+
                                     # Align Pa vs hPa unit differences
                                     aligned_target_press = target_press
                                     if gfs_vals.max() < 2000 and igra_vals.max() > 10000:
@@ -477,14 +510,18 @@ def _generate_static_plot(
 
                                     # Perform the 1D interpolation
                                     plot_data[col] = plot_data[col].interp({vertical_dim: aligned_target_press})
-                                    logger.info("Successfully interpolated GFS profile along '%s' to IGRA '%s' levels.", vertical_dim, target_press_name)
+                                    logger.info(
+                                        "Successfully interpolated GFS profile along '%s' to IGRA '%s' levels.",
+                                        vertical_dim,
+                                        target_press_name,
+                                    )
                                 except Exception as e:
                                     logger.warning("Failed to vertically interpolate GFS profile to IGRA: %s", e)
 
                 plot_obj = plot_class(data=plot_data, var1=plot_data[first_col], var2=plot_data[var2_val], label=first_label)
                 if hasattr(plot_obj, "plot"):
                     plot_obj.plot(color=first_color if first_color else "black")
-                    
+
                 for col, label, color in columns_spec[1:]:
                     if col in plot_data:
                         # Defense-in-depth: Ensure shapes align before plotting to prevent crashes
@@ -496,9 +533,9 @@ def _generate_static_plot(
                             )
                             continue
                         plot_obj.ax.plot(plot_data[col], plot_data[var2_val], label=label, color=color if color else "red")
-                
+
                 plot_obj.ax.set_ylabel(var2_val)
-                
+
                 # Meteorological standard: Plot pressure coordinate on log scale and invert Y-axis (height decreases as pressure decreases)
                 if "press" in var2_val.lower() or "isobaric" in var2_val.lower():
                     try:
@@ -515,7 +552,7 @@ def _generate_static_plot(
                 plot_obj.fig.tight_layout()
                 plot_obj.save(savename)
                 logger.info("Saved Track A profile plot '%s' (%d lines) to %s", name, len(columns_spec), savename)
-                
+
                 if hasattr(plot_obj, "close"):
                     plot_obj.close()
                 return plot_obj
@@ -711,7 +748,7 @@ def _generate_static_plot(
 def _generate_interactive_plot(
     name: str,
     plot_type: str,
-    input_data: Union[xr.Dataset, xr.DataArray, pd.DataFrame, Dict[str, Any]],
+    input_data: Union[xr.Dataset, xr.DataArray, Dict[str, Any]],
     kwargs: Dict[str, Any],
 ) -> Any:
     """Track B: Interactive plotting with monet-plots (HvPlot/GeoViews)."""

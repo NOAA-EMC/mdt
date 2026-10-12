@@ -1,5 +1,6 @@
 """Module for parsing and validating MDT YAML configuration files."""
 
+import copy
 import logging
 import pathlib
 from typing import Any, Dict, Union, cast
@@ -33,7 +34,11 @@ class ConfigParser:
         with self.config_path.open() as f:
             try:
                 config = yaml.safe_load(f)
-                return cast(Dict[str, Any], config) if config is not None else {}
+                if config is None:
+                    return {}
+                if not isinstance(config, dict):
+                    raise ValueError(f"Configuration validation failed: top-level YAML must be a mapping, got {type(config).__name__}.")
+                return cast(Dict[str, Any], config)
             except yaml.YAMLError as e:
                 raise ValueError(f"Error parsing YAML configuration: {e}") from e
 
@@ -46,6 +51,51 @@ class ConfigParser:
                 logger.error(msg)
                 raise ValueError(msg)
 
+        section_errors = []
+        for section_name in ("data", "pairing", "combine", "statistics", "plots", "reductions", "save", "execution"):
+            if section_name in self.config and not isinstance(self.config[section_name], dict):
+                section_errors.append(
+                    f"'{section_name}' section must be a dictionary, got {type(self.config[section_name]).__name__}."
+                )
+        if section_errors:
+            raise ValueError("Configuration validation failed:\n" + "\n".join(f"- {error}" for error in section_errors))
+
+        execution_cfg = self.config.get("execution") or {}
+        pairing_mode = execution_cfg.get("pairing_mode", "serial")
+        if not isinstance(pairing_mode, str) or pairing_mode not in {"serial", "concurrent"}:
+            raise ValueError(
+                f"Configuration validation failed: execution.pairing_mode must be 'serial' or 'concurrent', got {pairing_mode!r}."
+            )
+        clusters = execution_cfg.get("clusters", {})
+        if clusters is None:
+            clusters = {}
+        if not isinstance(clusters, dict):
+            raise ValueError("Configuration validation failed: execution.clusters must be a mapping.")
+        if "clusters" in execution_cfg and not clusters:
+            raise ValueError("Configuration validation failed: execution.clusters must contain at least one cluster.")
+        valid_modes = {"local", "hera", "jet", "orion", "hercules", "gaea", "ursa", "wcoss2", "slurm", "pbs", "lsf"}
+        for cluster_name, cluster_cfg in clusters.items():
+            if not isinstance(cluster_cfg, dict):
+                raise ValueError(f"Configuration validation failed: execution.clusters.{cluster_name} must be a mapping.")
+            mode = cluster_cfg.get("mode", "local")
+            if not isinstance(mode, str) or mode.lower() not in valid_modes:
+                raise ValueError(
+                    f"Configuration validation failed: execution.clusters.{cluster_name}.mode must be one of "
+                    f"{sorted(valid_modes)}, got {mode!r}."
+                )
+            workers = cluster_cfg.get("workers", 1)
+            if isinstance(workers, bool) or not isinstance(workers, int) or workers < 1:
+                raise ValueError(
+                    f"Configuration validation failed: execution.clusters.{cluster_name}.workers must be a positive integer, got {workers!r}."
+                )
+            if "cluster_kwargs" in cluster_cfg and not isinstance(cluster_cfg["cluster_kwargs"], dict):
+                raise ValueError(f"Configuration validation failed: execution.clusters.{cluster_name}.cluster_kwargs must be a mapping.")
+        default_cluster = execution_cfg.get("default_cluster")
+        if default_cluster is not None and default_cluster not in clusters:
+            raise ValueError(
+                f"Configuration validation failed: execution.default_cluster '{default_cluster}' is not defined in execution.clusters."
+            )
+
         # Ensure 'data' is a dictionary if it exists
         if "data" in self.config:
             if not isinstance(self.config["data"], dict):
@@ -55,6 +105,8 @@ class ConfigParser:
                     raise ValueError(f"Configuration validation failed: Data source '{name}' must be a mapping, got {type(details).__name__}.")
                 if "type" not in details:
                     raise ValueError(f"Configuration validation failed: Data source '{name}' is missing the required 'type' field.")
+                if "kwargs" in details and details["kwargs"] is not None and not isinstance(details["kwargs"], dict):
+                    raise ValueError(f"Configuration validation failed: data.{name}.kwargs must be a mapping.")
 
                 zarr_store = details.get("zarr_store")
                 if zarr_store is not None:
@@ -74,7 +126,8 @@ class ConfigParser:
                             )
                         if backend == "icechunk" and not (zarr_store.get("icechunk_url") or zarr_store.get("icechunk_repo")):
                             raise ValueError(
-                                f"Configuration validation failed: Data source '{name}': 'icechunk_repo' is required for 'icechunk' backend (preferred key: 'icechunk_url')."
+                                f"Configuration validation failed: Data source '{name}': "
+                                "'icechunk_repo' is required for 'icechunk' backend (preferred key: 'icechunk_url')."
                             )
 
         if "pairing" in self.config:
@@ -87,6 +140,18 @@ class ConfigParser:
                     raise ValueError(f"Configuration validation failed: Pairing '{name}' must be a dictionary, got {type(details).__name__}.")
                 if "source" not in details or "target" not in details:
                     raise ValueError(f"Configuration validation failed: Pairing '{name}' must specify both 'source' and 'target' keys.")
+                if "kwargs" in details and details["kwargs"] is not None and not isinstance(details["kwargs"], dict):
+                    raise ValueError(f"Configuration validation failed: pairing.{name}.kwargs must be a mapping.")
+
+        if "combine" in self.config:
+            for name, details in self.config["combine"].items():
+                if not isinstance(details, dict):
+                    raise ValueError(f"Configuration validation failed: combine.{name} must be a mapping.")
+                sources = details.get("sources")
+                if not isinstance(sources, list) or not sources or not all(isinstance(source, str) and source.strip() for source in sources):
+                    raise ValueError(f"Configuration validation failed: combine.{name}.sources must be a non-empty list of task names.")
+                if "kwargs" in details and details["kwargs"] is not None and not isinstance(details["kwargs"], dict):
+                    raise ValueError(f"Configuration validation failed: combine.{name}.kwargs must be a mapping.")
 
         if "statistics" in self.config:
             if not isinstance(self.config["statistics"], dict):
@@ -100,6 +165,17 @@ class ConfigParser:
                     )
                 if "input" not in details:
                     raise ValueError(f"Configuration validation failed: Statistics task '{name}' must specify an 'input' key.")
+                metrics = details.get("metrics")
+                if not isinstance(metrics, list) or not metrics or not all(isinstance(metric, str) and metric.strip() for metric in metrics):
+                    raise ValueError(
+                        f"Configuration validation failed: Statistics task '{name}' must specify a non-empty list of metric names."
+                    )
+
+        execution_cfg = self.config.get("execution") or {}
+        if "ecflow_data_dir" in execution_cfg:
+            data_dir = execution_cfg["ecflow_data_dir"]
+            if not isinstance(data_dir, str) or not data_dir.strip():
+                raise ValueError("Configuration validation failed: execution.ecflow_data_dir must be a non-empty path string.")
 
         if "plots" in self.config:
             if not isinstance(self.config["plots"], dict):
@@ -119,7 +195,10 @@ class ConfigParser:
                 )
             for name, details in self.config["reductions"].items():
                 if not isinstance(details, dict):
-                    raise ValueError(f"Configuration validation failed: Reduction task '{name}' must be a dictionary, got {type(details).__name__}.")
+                    raise ValueError(
+                        f"Configuration validation failed: Reduction task '{name}' must be a dictionary, "
+                        f"got {type(details).__name__}."
+                    )
                 if "input" not in details or "dim" not in details:
                     raise ValueError(f"Configuration validation failed: Reduction task '{name}' must specify 'input' and 'dim' fields.")
 
@@ -135,7 +214,10 @@ class ConfigParser:
                     raise ValueError(f"Configuration validation failed: Save task '{name}' must specify 'input', 'backend', and 'url' fields.")
                 backend = details["backend"]
                 if backend not in {"icechunk", "zarr"}:
-                    raise ValueError(f"Configuration validation failed: Save task '{name}': unsupported backend '{backend}'. Supported: 'icechunk', 'zarr'.")
+                    raise ValueError(
+                        f"Configuration validation failed: Save task '{name}': unsupported backend '{backend}'. "
+                        "Supported: 'icechunk', 'zarr'."
+                    )
 
         self._validate_region_masking()
 
@@ -236,7 +318,7 @@ class ConfigParser:
             The execution configuration section, including any
             orchestrator-specific keys defined in the YAML.
         """
-        exec_cfg: Dict[str, Any] = self.config.get("execution", {})
+        exec_cfg: Dict[str, Any] = copy.deepcopy(self.config.get("execution", {}))
         if not exec_cfg:
             logger.debug("No 'execution' section found; using default local 'compute' cluster.")
             return {"default_cluster": "compute", "clusters": {"compute": {"mode": "local"}}}

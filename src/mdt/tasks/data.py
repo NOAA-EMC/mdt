@@ -1,5 +1,9 @@
 import logging
-from typing import Any, Dict, Union, cast
+import os
+import threading
+from contextlib import contextmanager
+from pathlib import Path
+from typing import Any, Dict
 
 import pandas as pd
 import xarray as xr
@@ -7,13 +11,34 @@ import xarray as xr
 from mdt.utils import update_history
 
 logger = logging.getLogger(__name__)
+_ICECHUNK_ENV_LOCK = threading.RLock()
+
+
+@contextmanager
+def _icechunk_retry_environment(max_attempts: int):
+    """Set Icechunk's AWS retry setting temporarily and restore the process environment."""
+    with _ICECHUNK_ENV_LOCK:
+        old_value = os.environ.get("AWS_MAX_ATTEMPTS")
+        os.environ["AWS_MAX_ATTEMPTS"] = str(max_attempts)
+        try:
+            yield
+        finally:
+            if old_value is None:
+                os.environ.pop("AWS_MAX_ATTEMPTS", None)
+            else:
+                os.environ["AWS_MAX_ATTEMPTS"] = old_value
+
+
+def _is_unsupported_keyword_type_error(error: TypeError) -> bool:
+    message = str(error).lower()
+    return "unexpected keyword argument" in message or "takes no keyword arguments" in message
 
 
 def load_data(
     name: str,
     dataset_type: str,
     kwargs: Dict[str, Any],
-) -> Union[xr.Dataset, pd.DataFrame]:
+) -> xr.Dataset | xr.DataArray:
     """
     Unified entry point for loading data via monetio.load.
 
@@ -32,7 +57,7 @@ def load_data(
 
     Returns
     -------
-    xarray.Dataset or pandas.DataFrame
+    xarray.Dataset or xarray.DataArray
         The loaded data object.
 
     Notes
@@ -44,6 +69,9 @@ def load_data(
     import monetio
 
     kwargs = dict(kwargs)
+    # Make xarray the reader contract so the rest of the workflow never has to
+    # branch on a pandas representation.
+    kwargs["as_xarray"] = True
 
     # Extract optional isel / sel dictionary for general dimension subsetting
     isel_dict = kwargs.pop("isel", None)
@@ -52,24 +80,10 @@ def load_data(
     scale_dict = kwargs.pop("scale", None)
     offset_dict = kwargs.pop("offset", None)
 
-    def _apply_subsets(loaded_obj: Union[xr.Dataset, pd.DataFrame]) -> Union[xr.Dataset, pd.DataFrame]:
+    def _apply_subsets(loaded_obj: xr.Dataset | xr.DataArray) -> xr.Dataset | xr.DataArray:
         """Apply optional index-based (isel) or coordinate-based (sel) dimension slicing and generic post-processing."""
         if not isinstance(loaded_obj, xr.Dataset):
             return loaded_obj
-
-        if isel_dict is not None:
-            # Safely filter dictionary keys to those actually present in the dataset dimensions
-            valid_isel = {k: v for k, v in isel_dict.items() if k in loaded_obj.dims}
-            if valid_isel:
-                loaded_obj = loaded_obj.isel(valid_isel)
-                logger.info("Applied isel subsetting on '%s': %s", name, valid_isel)
-
-        if sel_dict is not None:
-            # Safely filter dictionary keys to those actually present in the dataset coordinates/dimensions
-            valid_sel = {k: v for k, v in sel_dict.items() if k in loaded_obj.coords or k in loaded_obj.dims}
-            if valid_sel:
-                loaded_obj = loaded_obj.sel(valid_sel)
-                logger.info("Applied sel subsetting on '%s': %s", name, valid_sel)
 
         # Apply generic variable/coordinate renaming
         if rename_dict is not None and isinstance(rename_dict, dict):
@@ -94,13 +108,15 @@ def load_data(
                     logger.info("Applied generic offset to variable '%s' of '%s' by shift %s", var, name, shift)
 
         # For GFS and GEFS datasets, GRIB2 loading of multiple lead times creates a 'time' dimension of size > 1,
-        # but the time index/coordinate is missing or scalar. We dynamically reconstruct and assign the proper
-        # datetime64[ns] 'time' index based on the cycle dates and lead times.
-        if "time" in loaded_obj.dims and loaded_obj.dims["time"] > 1:
+        # but the time index/coordinate is missing or scalar. Reconstruct it before coordinate-based sel.
+        if "time" in loaded_obj.sizes and loaded_obj.sizes["time"] > 1:
             if "time" not in loaded_obj.coords or loaded_obj.coords["time"].ndim == 0:
                 try:
                     dates_val = kwargs.get("dates")
                     lead_time_val = kwargs.get("lead_time", [0])
+
+                    if dates_val is None:
+                        raise ValueError("'dates' is required to reconstruct a missing time coordinate")
 
                     # Normalize dates to a list of strings/timestamps
                     if isinstance(dates_val, str):
@@ -122,7 +138,7 @@ def load_data(
                         for lt in lead_times:
                             valid_times.append(base_dt + pd.to_timedelta(lt, unit="h"))
 
-                    if len(valid_times) == loaded_obj.dims["time"]:
+                    if len(valid_times) == loaded_obj.sizes["time"]:
                         loaded_obj = loaded_obj.assign_coords({"time": ("time", valid_times)})
                         logger.info("Dynamically assigned matching 'time' coordinate index for '%s' (%d times).", name, len(valid_times))
                 except Exception as e:
@@ -160,31 +176,15 @@ def load_data(
         return loaded_obj
 
     def _prefer_xarray_result(
-        loaded_obj: Union[xr.Dataset, pd.DataFrame],
-        load_kwargs: Dict[str, Any],
-    ) -> Union[xr.Dataset, pd.DataFrame]:
-        """Prefer xarray output for point-reader pathways when possible."""
-        if isinstance(loaded_obj, xr.Dataset):
+        loaded_obj: Any,
+    ) -> xr.Dataset | xr.DataArray:
+        """Enforce the xarray reader contract at the MonetIO boundary."""
+        if isinstance(loaded_obj, (xr.Dataset, xr.DataArray)):
             return loaded_obj
-
-        if load_kwargs.get("as_xarray") is False:
-            return loaded_obj
-
-        retry_kwargs = dict(load_kwargs)
-        retry_kwargs["as_xarray"] = True
-        logger.info(
-            "Dataset '%s' returned DataFrame; retrying monetio.load with as_xarray=True.",
-            name,
+        raise TypeError(
+            f"Dataset '{name}' reader '{dataset_type}' returned {type(loaded_obj).__name__} "
+            "with as_xarray=True; MDT requires MonetIO to provide xarray objects."
         )
-        retry_obj = monetio.load(dataset_type, **retry_kwargs)
-        if isinstance(retry_obj, xr.Dataset):
-            return retry_obj
-
-        logger.warning(
-            "Dataset '%s' still returned non-xarray output after as_xarray=True retry.",
-            name,
-        )
-        return loaded_obj
 
     # Compatibility shim: ICAP config often uses singular `date`, while
     # monetio reader interface expects `dates`.
@@ -244,24 +244,24 @@ def load_data(
         load_kwargs.pop("icechunk_repo", None)
         return load_kwargs
 
-    import os
-
     # Auto-detect if standard Zarr or Icechunk store is already found on disk
     is_icechunk_check = kwargs.get("use_icechunk", False)
     icechunk_url_check = kwargs.get("icechunk_url") or kwargs.get("icechunk_repo", "")
     store_path_check = kwargs.get("store_path", f"./zarr_stores/{name}/") if not is_icechunk_check else ""
-    
+
     if not kwargs.get("existing_zarr", False):
         auto_use_existing = False
         if is_icechunk_check and icechunk_url_check and not icechunk_url_check.startswith("s3://"):
-            if os.path.exists(icechunk_url_check) and os.path.isdir(icechunk_url_check):
+            icechunk_path = Path(icechunk_url_check)
+            if icechunk_path.is_dir():
                 # Verify if it contains icechunk files
-                if os.path.exists(os.path.join(icechunk_url_check, "repo")):
+                if (icechunk_path / "repo").exists():
                     auto_use_existing = True
         elif not is_icechunk_check and store_path_check:
-            if os.path.exists(store_path_check) and os.path.isdir(store_path_check):
+            store_path = Path(store_path_check)
+            if store_path.is_dir():
                 # Verify if it contains any zarr metadata files
-                if os.path.exists(os.path.join(store_path_check, "zarr.json")) or os.path.exists(os.path.join(store_path_check, ".zgroup")):
+                if (store_path / "zarr.json").exists() or (store_path / ".zgroup").exists():
                     auto_use_existing = True
 
         if auto_use_existing:
@@ -303,45 +303,43 @@ def load_data(
                 # Mapping them to the proper AWS region and anonymous access prevents handshake timeouts
                 # and connection drops. We also set AWS_MAX_ATTEMPTS for object_store retries,
                 # and apply a strict max_concurrent_requests limit on RepositoryConfig.
-                import os
                 max_attempts = kwargs.get("max_scan_attempts", 5)
-                os.environ["AWS_MAX_ATTEMPTS"] = str(max_attempts)
+                with _icechunk_retry_environment(max_attempts):
+                    concurrency = kwargs.get("max_concurrent_requests", 16)
+                    config = icechunk.RepositoryConfig(max_concurrent_requests=int(concurrency))
 
-                concurrency = kwargs.get("max_concurrent_requests", 16)
-                config = icechunk.RepositoryConfig(max_concurrent_requests=int(concurrency))
-
-                net_timeout = int(kwargs.get("network_timeout", 60))
-                s3_conf = icechunk.s3_store(
-                    anonymous=True,
-                    region="us-east-1",
-                    network_stream_timeout_seconds=net_timeout,
-                )
-
-                prefixes = [
-                    "s3://noaa-gefs-pds/",
-                    "s3://noaa-gfs-bdp-pds/",
-                    "s3://noaa-ufs-pds/",
-                ]
-
-                for prefix in prefixes:
-                    container = icechunk.VirtualChunkContainer(
-                        url_prefix=prefix,
-                        store=s3_conf,
+                    net_timeout = int(kwargs.get("network_timeout", 60))
+                    s3_conf = icechunk.s3_store(
+                        anonymous=True,
+                        region="us-east-1",
+                        network_stream_timeout_seconds=net_timeout,
                     )
-                    config.set_virtual_chunk_container(container)
 
-                authorize = {prefix: None for prefix in prefixes}
-                repo = icechunk.Repository.open(
-                    storage,
-                    config=config,
-                    authorize_virtual_chunk_access=authorize,
-                )
-                session = repo.readonly_session(branch="main")
-                ds = xr.open_zarr(session.store, consolidated=False, **zarr_kwargs)
+                    prefixes = [
+                        "s3://noaa-gefs-pds/",
+                        "s3://noaa-gfs-bdp-pds/",
+                        "s3://noaa-ufs-pds/",
+                    ]
+
+                    for prefix in prefixes:
+                        container = icechunk.VirtualChunkContainer(
+                            url_prefix=prefix,
+                            store=s3_conf,
+                        )
+                        config.set_virtual_chunk_container(container)
+
+                    authorize = {prefix: None for prefix in prefixes}
+                    repo = icechunk.Repository.open(
+                        storage,
+                        config=config,
+                        authorize_virtual_chunk_access=authorize,
+                    )
+                    session = repo.readonly_session(branch="main")
+                    ds = xr.open_zarr(session.store, consolidated=False, **zarr_kwargs)
                 msg = f"Loaded existing Icechunk store '{name}' from {icechunk_url}."
 
                 ds = update_history(ds, msg)
-                return cast(Union[xr.Dataset, pd.DataFrame], _apply_subsets(ds))
+                return _apply_subsets(ds)
             except Exception as e:
                 logger.error("Failed to load existing Icechunk store '%s': %s", name, e)
                 raise
@@ -351,7 +349,7 @@ def load_data(
                 ds = xr.open_zarr(store_path, **zarr_kwargs)
                 msg = f"Loaded existing Zarr store '{name}' from {store_path}."
                 ds = update_history(ds, msg)
-                return cast(Union[xr.Dataset, pd.DataFrame], _apply_subsets(ds))
+                return _apply_subsets(ds)
             except Exception as e:
                 logger.error("Failed to load existing Zarr store '%s': %s", name, e)
                 raise
@@ -375,15 +373,17 @@ def load_data(
             # Call monetio.load with all VirtualiZarr parameters
             load_kwargs = _normalize_virtualizarr_kwargs(kwargs)
             ds = monetio.load(dataset_type, **load_kwargs)
-            ds = _prefer_xarray_result(cast(Union[xr.Dataset, pd.DataFrame], ds), kwargs)
+            ds = _prefer_xarray_result(ds)
             logger.info("Successfully loaded '%s' via VirtualiZarr pathway.", name)
 
             # Add MDT provenance tracking
             msg = f"Loaded dataset '{name}' via VirtualiZarr (backend={backend})."
             ds = update_history(ds, msg)
-            return cast(Union[xr.Dataset, pd.DataFrame], _apply_subsets(ds))
+            return _apply_subsets(ds)
 
         except TypeError as e:
+            if not _is_unsupported_keyword_type_error(e):
+                raise
             # Handle cases where reader doesn't support VirtualiZarr kwargs yet
             logger.warning(
                 "VirtualiZarr load failed for '%s' due to unexpected arguments: %s. Retrying with standard monetio.load.",
@@ -393,22 +393,22 @@ def load_data(
             fallback_kwargs = _strip_virtualizarr_kwargs(kwargs)
             logger.info("Retrying standard monetio.load with kwargs: %s", fallback_kwargs)
             ds = monetio.load(dataset_type, **fallback_kwargs)
-            ds = _prefer_xarray_result(cast(Union[xr.Dataset, pd.DataFrame], ds), fallback_kwargs)
+            ds = _prefer_xarray_result(ds)
             msg = f"Loaded dataset '{name}' (VirtualiZarr fallback used)."
             ds = update_history(ds, msg)
-            return cast(Union[xr.Dataset, pd.DataFrame], _apply_subsets(ds))
+            return _apply_subsets(ds)
 
     # 3. Standard Loading Pathway
     try:
         ds = monetio.load(dataset_type, **kwargs)
-        ds = _prefer_xarray_result(cast(Union[xr.Dataset, pd.DataFrame], ds), kwargs)
+        ds = _prefer_xarray_result(ds)
 
         # Provenance Tracking
         msg = f"Loaded dataset '{name}' using type '{dataset_type}' with params {kwargs}."
         ds = update_history(ds, msg)
 
         logger.info("Successfully loaded dataset '%s'", name)
-        return cast(Union[xr.Dataset, pd.DataFrame], _apply_subsets(ds))
+        return _apply_subsets(ds)
 
     except Exception as e:
         logger.error("Failed to load dataset '%s': %s", name, e)
@@ -417,20 +417,20 @@ def load_data(
 
 def save_data(
     name: str,
-    data: xr.Dataset,
+    data: xr.Dataset | xr.DataArray,
     backend: str,
     url: str,
-    kwargs: Dict[str, Any] = {},
+    kwargs: Dict[str, Any] | None = None,
 ) -> None:
     """
-    Saves an xarray Dataset to either an Icechunk repository or a local Zarr store.
+    Saves an xarray Dataset or DataArray to Icechunk or a local Zarr store.
 
     Parameters
     ----------
     name : str
         The task name/identifier.
-    data : xr.Dataset
-        The dataset to save.
+    data : xr.Dataset or xr.DataArray
+        The xarray object to save.
     backend : str
         The storage backend to use: 'icechunk' or 'zarr'.
     url : str
@@ -440,11 +440,13 @@ def save_data(
     """
     logger.info("Saving dataset '%s' to %s store at '%s'", name, backend, url)
 
-    if not isinstance(data, xr.Dataset):
-        raise TypeError(f"Only xarray.Dataset objects can be saved, got {type(data).__name__}")
+    if not isinstance(data, (xr.Dataset, xr.DataArray)):
+        raise TypeError(f"Only xarray Dataset or DataArray objects can be saved, got {type(data).__name__}")
 
     import pathlib
     import shutil
+
+    kwargs = kwargs or {}
 
     if backend == "icechunk":
         import icechunk

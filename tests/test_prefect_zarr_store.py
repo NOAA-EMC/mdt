@@ -10,6 +10,10 @@ prefect_mock = types.ModuleType("prefect")
 prefect_mock.task = MagicMock()
 prefect_mock.flow = MagicMock()
 prefect_mock.get_run_logger = MagicMock()
+prefect_cache_policies_mock = types.ModuleType("prefect.cache_policies")
+prefect_cache_policies_mock.NONE = object()
+prefect_task_runners_mock = types.ModuleType("prefect.task_runners")
+prefect_task_runners_mock.ConcurrentTaskRunner = MagicMock()
 
 prefect_dask_mock = types.ModuleType("prefect_dask")
 prefect_dask_task_runners_mock = types.ModuleType("prefect_dask.task_runners")
@@ -17,6 +21,8 @@ prefect_dask_mock.task_runners = prefect_dask_task_runners_mock
 prefect_dask_task_runners_mock.DaskTaskRunner = MagicMock()
 
 sys.modules["prefect"] = prefect_mock
+sys.modules["prefect.cache_policies"] = prefect_cache_policies_mock
+sys.modules["prefect.task_runners"] = prefect_task_runners_mock
 sys.modules["prefect_dask"] = prefect_dask_mock
 sys.modules["prefect_dask.task_runners"] = prefect_dask_task_runners_mock
 

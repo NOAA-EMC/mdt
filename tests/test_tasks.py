@@ -1,11 +1,18 @@
 import dask.array as da
 import numpy as np
 import pandas as pd
+import pytest
 import xarray as xr
 
 from mdt.tasks.data import load_data
 from mdt.tasks.pairing import pair_data
 from mdt.tasks.statistics import compute_statistics
+
+
+@pytest.fixture(autouse=True)
+def _mock_esmf_manager(mocker):
+    """Keep unit tests independent of process-global ESMF initialization."""
+    mocker.patch("mdt.tasks.pairing._ensure_esmf_manager")
 
 
 def test_load_data_provenance(mocker):
@@ -14,13 +21,22 @@ def test_load_data_provenance(mocker):
     ds = xr.Dataset({"val": (("x"), [1, 2, 3])})
 
     # Mock monetio.load
-    mocker.patch("monetio.load", return_value=ds)
+    mock_load = mocker.patch("monetio.load", return_value=ds)
 
     # Load data
     res = load_data("test_data", "cmaq", {"files": "dummy.nc"})
 
     # Check history
     assert "Loaded dataset 'test_data'" in res.attrs["history"]
+    assert mock_load.call_args.kwargs["as_xarray"] is True
+
+
+def test_load_data_rejects_tabular_reader_output(mocker):
+    """A reader that ignores as_xarray cannot leak pandas into the workflow."""
+    mocker.patch("monetio.load", return_value=pd.DataFrame({"value": [1]}))
+
+    with pytest.raises(TypeError, match="MDT requires MonetIO to provide xarray objects"):
+        load_data("tabular_reader", "example", {})
 
 
 def test_load_data_icap_date_alias_to_dates(mocker):
@@ -101,10 +117,11 @@ def test_compute_statistics_double_check(mocker):
     mocker.patch.object(monet_stats, "RMSE", side_effect=mock_rmse, create=True)
     mocker.patch.object(monet_stats, "rmse", side_effect=mock_rmse, create=True)
 
-    # 1. Eager Run (Pandas)
+    # 1. Legacy tabular input is normalized and metric results remain xarray.
     df = pd.DataFrame({"obs": np.random.rand(10), "mod": np.random.rand(10)})
     results_df = compute_statistics("test_stats", metrics, df, kwargs)
-    assert results_df["RMSE"] == 0.5
+    assert isinstance(results_df["RMSE"], xr.DataArray)
+    assert float(results_df["RMSE"]) == 0.5
 
     # 2. Eager Run (Xarray NumPy)
     ds_eager = xr.Dataset({"obs": (("x"), np.random.rand(10)), "mod": (("x"), np.random.rand(10))})

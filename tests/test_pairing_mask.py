@@ -38,6 +38,11 @@ def mock_pair(mocker, dummy_paired_dataset):
 class TestPairingMaskApplication:
     """Tests for mask application in pair_data (Requirement 1.1, 1.2)."""
 
+    @pytest.fixture(autouse=True)
+    def _mock_esmf_manager(self, mocker):
+        """Keep unit tests independent of process-global ESMF initialization."""
+        mocker.patch("mdt.tasks.pairing._ensure_esmf_manager")
+
     def test_query_mask_called_with_correct_args(self, mocker, mock_pair, dummy_paired_dataset):
         """When mask='land', query_mask is called with (paired_data, 'land')."""
         from mdt.tasks.pairing import pair_data
@@ -107,6 +112,11 @@ class TestPairingMaskApplication:
 class TestPairingMaskExceptionHandling:
     """Tests for exception handling when query_mask fails (Requirement 1.3)."""
 
+    @pytest.fixture(autouse=True)
+    def _mock_esmf_manager(self, mocker):
+        """Keep unit tests independent of process-global ESMF initialization."""
+        mocker.patch("mdt.tasks.pairing._ensure_esmf_manager")
+
     def test_exception_logged_and_reraised(self, mocker, mock_pair, dummy_paired_dataset, caplog):
         """When query_mask raises, the error is logged at ERROR level and re-raised."""
         from mdt.tasks.pairing import pair_data
@@ -135,15 +145,16 @@ class TestPairingMaskExceptionHandling:
 
 def test_source_and_target_duplicate_time_values_are_deduplicated_before_pairing(mocker):
     """Duplicate time values in source/target are dropped before monet pairing."""
+    mocker.patch("mdt.tasks.pairing._ensure_esmf_manager")
     from mdt.tasks.pairing import pair_data
 
     source = xr.Dataset(
-        {"mod": ("time", [1.0, 1.5, 2.0])},
-        coords={"time": ["2023-08-01T00:00:00", "2023-08-01T00:00:00", "2023-08-01T01:00:00"]},
+        {"mod": (("time", "x"), [[1.0], [1.5], [2.0]])},
+        coords={"time": ["2023-08-01T00:00:00", "2023-08-01T00:00:00", "2023-08-01T01:00:00"], "x": [0]},
     )
     target = xr.Dataset(
-        {"obs": ("time", [10.0, 11.0, 12.0])},
-        coords={"time": ["2023-08-01T00:00:00", "2023-08-01T00:00:00", "2023-08-01T01:00:00"]},
+        {"obs": (("time", "x"), [[10.0], [11.0], [12.0]])},
+        coords={"time": ["2023-08-01T00:00:00", "2023-08-01T00:00:00", "2023-08-01T01:00:00"], "x": [0]},
     )
 
     mock_pair = mocker.patch("monet.util.combinetool.pair", return_value=source)

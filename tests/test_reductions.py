@@ -1,7 +1,23 @@
 import numpy as np
+import pytest
 import xarray as xr
 
-from mdt.tasks.reductions import spatial_mean
+from mdt.tasks.reductions import calculate_reduction, spatial_mean
+
+
+@pytest.mark.parametrize(
+    ("method", "dim", "message"),
+    [
+        ("median", "lat", "Unsupported reduction method"),
+        ("mean", "missing", "Unknown reduction dimension"),
+        ("mean", [], "non-empty list"),
+    ],
+)
+def test_reduction_rejects_invalid_method_or_dimensions(method, dim, message):
+    """Reject invalid reduction arguments before invoking xarray operations."""
+    data = xr.DataArray(np.ones((2, 2)), dims=("lat", "lon"))
+    with pytest.raises(ValueError, match=message):
+        calculate_reduction(data, method=method, dim=dim)
 
 
 def test_spatial_mean_double_check():

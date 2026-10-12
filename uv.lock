@@ -1692,7 +1692,7 @@ requires-dist = [
     { name = "networkx" },
     { name = "numpy" },
     { name = "pandas" },
-    { name = "prefect", marker = "extra == 'prefect'", specifier = ">=2.0.0" },
+    { name = "prefect", marker = "extra == 'prefect'", specifier = ">=3.0.0" },
     { name = "prefect-dask", marker = "extra == 'prefect'" },
     { name = "pytest", marker = "extra == 'dev'" },
     { name = "pytest-mock", marker = "extra == 'dev'" },
@@ -1754,7 +1754,7 @@ dependencies = [
 [[package]]
 name = "monet-stats"
 version = "1.0.0"
-source = { git = "https://github.com/noaa-oar-arl/monet-stats.git#a68a259df08dd9a770983e7754caa39f2797bf60" }
+source = { git = "https://github.com/noaa-oar-arl/monet-stats#a68a259df08dd9a770983e7754caa39f2797bf60" }
 dependencies = [
     { name = "numpy" },
     { name = "pandas" },

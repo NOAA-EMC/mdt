@@ -15,6 +15,10 @@ class DAGBuilder:
     def __init__(self, config: "ConfigParser"):
         self.config = config
         self.graph: nx.DiGraph = nx.DiGraph()
+        self.errors: list[str] = []
+
+    def _record_error(self, path: str, message: str) -> None:
+        self.errors.append(f"{path}: {message}")
 
     def build(self) -> nx.DiGraph:
         """
@@ -32,6 +36,8 @@ class DAGBuilder:
             If the generated graph contains cycles and is not a valid DAG.
         """
         logger.info("Building task graph...")
+        self.graph = nx.DiGraph()
+        self.errors = []
         self._add_data_nodes()
         self._add_pairing_nodes()
         self._add_combine_nodes()
@@ -39,6 +45,10 @@ class DAGBuilder:
         self._add_statistics_nodes()
         self._add_plotting_nodes()
         self._add_save_nodes()
+
+        if self.errors:
+            details = "\n".join(f"- {error}" for error in self.errors)
+            raise ValueError(f"Workflow configuration is invalid:\n{details}")
 
         # Validate that the graph is indeed a DAG
         if not nx.is_directed_acyclic_graph(self.graph):
@@ -64,10 +74,10 @@ class DAGBuilder:
             # Type specifies the reader to use from monetio.readers
             dataset_type = details.get("type")
             if not dataset_type:
-                logger.warning(f"Data source '{name}' is missing 'type'. Skipping.")
+                self._record_error(f"data.{name}.type", "required non-empty reader type is missing")
                 continue
 
-            kwargs: dict[str, Any] = details.get("kwargs") or {}
+            kwargs: dict[str, Any] = dict(details.get("kwargs") or {})
             if "use_kerchunk" in details:
                 kwargs["use_kerchunk"] = details.get("use_kerchunk")
             if "kerchunk_file" in details:
@@ -154,17 +164,20 @@ class DAGBuilder:
             target = details.get("target")
 
             if not source or not target:
-                logger.warning(f"Pairing '{name}' is missing 'source' or 'target'. Skipping.")
+                if not source:
+                    self._record_error(f"pairing.{name}.source", "required dataset reference is missing")
+                if not target:
+                    self._record_error(f"pairing.{name}.target", "required dataset reference is missing")
                 continue
 
             source_node = self._find_node(source)
             target_node = self._find_node(target)
 
             if not source_node:
-                logger.error(f"Source '{source}' for pairing '{name}' not found. Skipping pairing.")
-                continue
+                self._record_error(f"pairing.{name}.source", f"reference '{source}' does not resolve to a task")
             if not target_node:
-                logger.error(f"Target '{target}' for pairing '{name}' not found. Skipping pairing.")
+                self._record_error(f"pairing.{name}.target", f"reference '{target}' does not resolve to a task")
+            if not source_node or not target_node:
                 continue
 
             target_cluster = details.get("cluster", default_cluster)
@@ -175,7 +188,7 @@ class DAGBuilder:
                 "name": name,
                 "method": details.get("method", "interpolate"),
                 "cluster": target_cluster,
-                "kwargs": details.get("kwargs", {}),
+                "kwargs": dict(details.get("kwargs") or {}),
                 "source_name": source,
                 "target_name": target,
             }
@@ -202,20 +215,22 @@ class DAGBuilder:
             dim = details.get("dim", "model")
 
             if not sources:
-                logger.warning(f"Combine task '{name}' has no sources. Skipping.")
+                self._record_error(f"combine.{name}.sources", "at least one source reference is required")
                 continue
 
             # Check if all sources exist
             valid_sources = []
-            for source in sources:
+            for source_index, source in enumerate(sources):
                 source_node_id = self._find_node(source)
                 if source_node_id:
                     valid_sources.append(source_node_id)
                 else:
-                    logger.warning(f"Source '{source}' for combine task '{name}' not found. Skipping source.")
+                    self._record_error(
+                        f"combine.{name}.sources[{source_index}]",
+                        f"reference '{source}' does not resolve to a task",
+                    )
 
             if not valid_sources:
-                logger.error(f"Combine task '{name}' has no valid sources. Skipping.")
                 continue
 
             target_cluster = details.get("cluster", default_cluster)
@@ -227,7 +242,7 @@ class DAGBuilder:
                 sources=sources,  # List of original names, Engine uses this to look them up
                 dim=dim,
                 cluster=target_cluster,
-                kwargs=details.get("kwargs", {}),
+                kwargs=dict(details.get("kwargs") or {}),
             )
 
             for pair_node_id in valid_sources:
@@ -247,17 +262,17 @@ class DAGBuilder:
             input_data = details.get("input")
 
             if not input_data:
-                logger.warning(f"Statistics task '{name}' is missing 'input'. Skipping.")
+                self._record_error(f"statistics.{name}.input", "required task reference is missing")
                 continue
 
             target_parent = self._find_node(input_data)
 
             if not target_parent:
-                logger.error(f"Input '{input_data}' for statistics '{name}' not found. Skipping stats.")
+                self._record_error(f"statistics.{name}.input", f"reference '{input_data}' does not resolve to a task")
                 continue
 
             target_cluster = details.get("cluster", default_cluster)
-            kwargs = details.get("kwargs", {})
+            kwargs = dict(details.get("kwargs") or {})
             regions = kwargs.get("regions") if kwargs else None
 
             logger.debug(f"Adding statistics node: {node_id} (input={target_parent}, cluster={target_cluster})")
@@ -288,17 +303,17 @@ class DAGBuilder:
             input_data = details.get("input")
 
             if not input_data:
-                logger.warning(f"Plot task '{name}' is missing 'input'. Skipping.")
+                self._record_error(f"plots.{name}.input", "required task reference is missing")
                 continue
 
             target_parent = self._find_node(input_data)
 
             if not target_parent:
-                logger.error(f"Input '{input_data}' for plot '{name}' not found. Skipping plot.")
+                self._record_error(f"plots.{name}.input", f"reference '{input_data}' does not resolve to a task")
                 continue
 
             target_cluster = details.get("cluster", default_cluster)
-            kwargs = details.get("kwargs", {})
+            kwargs = dict(details.get("kwargs") or {})
             regions = kwargs.get("regions") if kwargs else None
 
             logger.debug(f"Adding plotting node: {node_id} (input={target_parent}, cluster={target_cluster})")
@@ -318,7 +333,7 @@ class DAGBuilder:
 
     def _add_reduction_nodes(self) -> None:
         """Adds nodes for calculating data reductions (e.g. mean along dimensions)."""
-        reduction_cfg = self.config.reductions
+        reduction_cfg = getattr(self.config, "reductions", {})
         if not reduction_cfg:
             return
 
@@ -329,20 +344,20 @@ class DAGBuilder:
             input_data = details.get("input")
 
             if not input_data:
-                logger.warning(f"Reduction task '{name}' is missing 'input'. Skipping.")
+                self._record_error(f"reductions.{name}.input", "required task reference is missing")
                 continue
 
             target_parent = self._find_node(input_data)
 
             if not target_parent:
-                logger.error(f"Input '{input_data}' for reduction '{name}' not found. Skipping reduction.")
+                self._record_error(f"reductions.{name}.input", f"reference '{input_data}' does not resolve to a task")
                 continue
 
             target_cluster = details.get("cluster", default_cluster)
             method = details.get("method", "mean")
             dim = details.get("dim")
             force_weighted = details.get("force_weighted", False)
-            kwargs = details.get("kwargs", {})
+            kwargs = dict(details.get("kwargs") or {})
 
             logger.debug(f"Adding reduction node: {node_id} (input={target_parent}, cluster={target_cluster})")
             self.graph.add_node(
@@ -361,7 +376,7 @@ class DAGBuilder:
 
     def _add_save_nodes(self) -> None:
         """Adds nodes for saving/writing datasets to Zarr or Icechunk."""
-        save_cfg = self.config.save
+        save_cfg = getattr(self.config, "save", {})
         if not save_cfg:
             return
 
@@ -372,19 +387,19 @@ class DAGBuilder:
             input_data = details.get("input")
 
             if not input_data:
-                logger.warning(f"Save task '{name}' is missing 'input'. Skipping.")
+                self._record_error(f"save.{name}.input", "required task reference is missing")
                 continue
 
             target_parent = self._find_node(input_data)
 
             if not target_parent:
-                logger.error(f"Input '{input_data}' for save '{name}' not found. Skipping save.")
+                self._record_error(f"save.{name}.input", f"reference '{input_data}' does not resolve to a task")
                 continue
 
             target_cluster = details.get("cluster", default_cluster)
             backend = details.get("backend")
             url = details.get("url")
-            kwargs = details.get("kwargs", {})
+            kwargs = dict(details.get("kwargs") or {})
 
             logger.debug(f"Adding save node: {node_id} (input={target_parent}, cluster={target_cluster})")
             self.graph.add_node(

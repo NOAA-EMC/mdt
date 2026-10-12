@@ -1,8 +1,11 @@
 """Prefect execution engine and task wrappers for MDT."""
 
+import copy
 import logging
+import re
 import subprocess
 from typing import TYPE_CHECKING, Any, Dict, List, cast
+from urllib.parse import urlparse
 
 import networkx as nx
 
@@ -18,6 +21,11 @@ if TYPE_CHECKING:
     from mdt.config import ConfigParser
 
 logger = logging.getLogger(__name__)
+
+
+def _serialize_local_pairing_tasks(clusters_cfg: Dict[str, Any], pairing_mode: str) -> bool:
+    """Return whether local pair tasks must run inline for compatibility."""
+    return pairing_mode == "serial" and all(cfg.get("mode", "local") == "local" for cfg in clusters_cfg.values())
 
 
 def prefect_calculate_reduction(
@@ -107,6 +115,33 @@ class PrefectEngine(Engine):
         self.dag = dag
         self.config = config
         self.clusters: Dict[str, Any] = {}
+        self._primary_cluster: Any = None
+        self._submitted_jobs: List[tuple[str, str]] = []
+
+    def close(self) -> None:
+        """Close all Dask clusters owned by this engine."""
+        resources = [self._primary_cluster]
+        for resource in self.clusters.values():
+            resources.extend(resource if isinstance(resource, (list, tuple)) else [resource])
+        seen: set[int] = set()
+        for resource in resources:
+            if resource is None or id(resource) in seen:
+                continue
+            seen.add(id(resource))
+            close = getattr(resource, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception as exc:
+                    logger.warning("Failed to close Dask resource %s: %s", type(resource).__name__, exc)
+        for cancel_cmd, job_id in reversed(self._submitted_jobs):
+            try:
+                subprocess.run([cancel_cmd, job_id], check=True, capture_output=True, text=True)  # noqa: S603
+            except Exception as exc:
+                logger.warning("Failed to cancel submitted worker job %s: %s", job_id, exc)
+        self._submitted_jobs.clear()
+        self._primary_cluster = None
+        self.clusters.clear()
 
     def _setup_dask_clusters(self) -> Any:
         """
@@ -129,11 +164,33 @@ class PrefectEngine(Engine):
             workers = cluster_cfg.get("workers", 1)
             memory_limit = cluster_cfg.get("memory_limit", "auto")
             # Assign the requested numeric resource to the local workers to prevent hanging
-            return dask.distributed.LocalCluster(
+            cluster = dask.distributed.LocalCluster(
                 n_workers=workers,
                 resources={cluster_name.upper(): 1},
                 memory_limit=memory_limit,
             )
+            self._primary_cluster = cluster
+            return cluster
+
+        # Local service/compute clusters share one workstation. Expose each logical
+        # resource on its workers so annotated tasks cannot wait for a nonexistent tag.
+        if clusters_cfg and all(cfg.get("mode", "local") == "local" for cfg in clusters_cfg.values()):
+            cluster = dask.distributed.LocalCluster(n_workers=0, host="127.0.0.1")
+            self._primary_cluster = cluster
+            scheduler = urlparse(cluster.scheduler_address)
+            for cluster_name, cfg in clusters_cfg.items():
+                workers = int(cfg.get("workers", 1))
+                self.clusters[cluster_name] = [
+                    dask.distributed.Worker(
+                        scheduler.hostname,
+                        scheduler.port,
+                        nthreads=int(cfg.get("threads_per_worker", 1)),
+                        resources={cluster_name.upper(): 1},
+                        memory_limit=cfg.get("memory_limit", "auto"),
+                    )
+                    for _ in range(workers)
+                ]
+            return cluster
 
         # Multi-cluster or HPC mode:
         # Create a central scheduler on the node where MDT is executed.
@@ -142,12 +199,13 @@ class PrefectEngine(Engine):
             n_workers=0,  # The local cluster is just the scheduler
             host="0.0.0.0",  # noqa: S104 — Allow external connections
         )
+        self._primary_cluster = primary_cluster
         scheduler_address = primary_cluster.scheduler_address
 
         for cluster_name, cfg in clusters_cfg.items():
             mode = cfg.get("mode", "local")
             workers = cfg.get("workers", 1)
-            kwargs = cfg.get("cluster_kwargs", {})
+            kwargs = copy.deepcopy(cfg.get("cluster_kwargs", {}))
 
             # Let the HPCProfileFactory know the logical name of this cluster (e.g. 'service')
             # so it can choose appropriate partitions.
@@ -157,14 +215,20 @@ class PrefectEngine(Engine):
             res_name = cluster_name.upper()
 
             if mode == "local":
-                logger.info(f"Scaling local workers for '{cluster_name}'")
-                # Scale the central cluster and explicitly assign resources
-                # We use scale(cores=...) or similar if possible, but scale(workers)
-                # is standard for LocalCluster.
-                primary_cluster.scale(workers)
-                # Dask workers started via scale() on LocalCluster might not automatically
-                # get the resource tag. For LocalCluster we usually set it in the constructor.
-                # However, for multi-cluster we rely on the resources dict if possible.
+                logger.info("Starting %s tagged local Dask worker(s) for '%s'", workers, cluster_name)
+                scheduler = urlparse(scheduler_address)
+                local_workers = []
+                for _ in range(int(workers)):
+                    local_workers.append(
+                        dask.distributed.Worker(
+                            scheduler.hostname,
+                            scheduler.port,
+                            nthreads=int(cfg.get("threads_per_worker", 1)),
+                            resources={res_name: 1},
+                            memory_limit=cfg.get("memory_limit", "auto"),
+                        )
+                    )
+                self.clusters[cluster_name] = local_workers
             else:
                 logger.info(f"Setting up HPC cluster '{cluster_name}' (mode: {mode}) connecting to {scheduler_address}")
 
@@ -184,6 +248,7 @@ class PrefectEngine(Engine):
 
                 # Create the JobQueue object representing this specific profile/queue
                 hpc_cluster = HPCProfileFactory.create_cluster(mode, **kwargs)
+                self.clusters[cluster_name] = hpc_cluster
 
                 # Retrieve the underlying job script formatted for the specific batch system
                 hpc_job_script = hpc_cluster.job_script()
@@ -196,23 +261,47 @@ class PrefectEngine(Engine):
 
                 # Determine the submission command based on the mode (slurm -> sbatch, pbs -> qsub)
                 submit_cmd = "sbatch" if "slurm" in mode or mode in ["hera", "jet", "orion", "hercules", "gaea", "ursa"] else "qsub"
+                cancel_cmd = "scancel" if submit_cmd == "sbatch" else "qdel"
                 if mode == "lsf":
                     submit_cmd = "bsub"
+                    cancel_cmd = "bkill"
+                submit_args = [submit_cmd, "--parsable"] if submit_cmd == "sbatch" else [submit_cmd]
 
                 # Manually submit the modified script for the requested number of workers
                 logger.info(f"Submitting {workers} {submit_cmd} jobs to '{cluster_name}' queue.")
                 for _ in range(workers):
                     try:
-                        subprocess.run([submit_cmd], input=hpc_job_script.encode("utf-8"), check=True)  # noqa: S603
-                    except subprocess.CalledProcessError as e:
-                        logger.error(f"Failed to submit HPC worker job for cluster {cluster_name}: {e}")
-                        raise
-
-                self.clusters[cluster_name] = hpc_cluster
+                        completed = subprocess.run(  # noqa: S603
+                            submit_args, input=hpc_job_script, check=True, capture_output=True, text=True
+                        )
+                        self._submitted_jobs.append((cancel_cmd, self._parse_job_id(submit_cmd, completed.stdout or "")))
+                    except Exception as exc:
+                        logger.error("Failed to submit HPC worker job for cluster %s: %s", cluster_name, exc)
+                        self.close()
+                        raise RuntimeError(f"Failed to submit HPC worker job for cluster '{cluster_name}': {exc}") from exc
 
         return primary_cluster
 
+    @staticmethod
+    def _parse_job_id(submit_cmd: str, output: str) -> str:
+        """Extract a scheduler job identifier from the submission response."""
+        if submit_cmd == "bsub":
+            match = re.search(r"Job\s+<(\d+)>", output)
+            job_id = match.group(1) if match else ""
+        else:
+            job_id = output.strip().split()[0].split(";")[0] if output.strip() else ""
+        if not job_id:
+            raise RuntimeError(f"Could not parse {submit_cmd} job identifier from response: {output!r}")
+        return job_id
+
     def execute(self) -> Dict[str, Any]:
+        """Run the flow and close resources even when setup or tasks fail."""
+        try:
+            return self._execute()
+        finally:
+            self.close()
+
+    def _execute(self) -> Dict[str, Any]:
         """
         Builds the Dask cluster topology and executes the Prefect flow.
 
@@ -247,7 +336,8 @@ class PrefectEngine(Engine):
         use_dask_runner = len(clusters_cfg) > 1 or any(
             cfg.get("mode", "local") != "local" or cfg.get("workers", 1) > 1 for cfg in clusters_cfg.values()
         )
-        serialize_pair_tasks = all(cfg.get("mode", "local") == "local" for cfg in clusters_cfg.values())
+        pairing_mode = exec_cfg.get("pairing_mode", "serial")
+        serialize_pair_tasks = _serialize_local_pairing_tasks(clusters_cfg, pairing_mode)
 
         def _resolve_output(value: Any) -> Any:
             if hasattr(value, "result") and callable(value.result):
@@ -429,7 +519,8 @@ class PrefectEngine(Engine):
         # Requirement: Ensure the CLI waits for task completion.
         # Prefect .submit() returns futures. We need to wait for them.
         logger.info("Waiting for tasks to complete...")
-        final_results = {}
+        final_results: Dict[str, Any] = {}
+        failed_tasks: Dict[str, Exception] = {}
         for node_id, future in task_futures.items():
             try:
                 # This will block until the specific task is done.
@@ -437,6 +528,10 @@ class PrefectEngine(Engine):
             except Exception as e:
                 logger.error(f"Task {node_id} failed: {e}")
                 final_results[node_id] = e
+                failed_tasks[node_id] = e
 
         logger.info("All tasks completed.")
+        if failed_tasks:
+            failure_summary = ", ".join(f"{node_id}: {error}" for node_id, error in failed_tasks.items())
+            raise RuntimeError(f"Workflow failed in {len(failed_tasks)} task(s): {failure_summary}") from next(iter(failed_tasks.values()))
         return final_results

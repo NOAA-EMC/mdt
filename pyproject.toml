@@ -27,7 +27,7 @@ dependencies = [
 mdt = "mdt.cli:main"
 
 [project.optional-dependencies]
-prefect = ["prefect>=2.0.0", "prefect-dask"]
+prefect = ["prefect>=3.0.0", "prefect-dask"]
 dask = ["dask", "dask-jobqueue"]
 cubed = ["cubed", "cubed-xarray"]
 dev = ["ruff", "pytest", "pytest-mock", "hypothesis"]
