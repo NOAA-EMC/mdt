@@ -158,9 +158,7 @@ class TestEcFlowE2E:
         defs = engine.build_suite()
 
         tasks = defs.get_all_tasks()
-        assert len(tasks) == dag.number_of_nodes(), (
-            f"Expected {dag.number_of_nodes()} task nodes from the configured DAG, got {len(tasks)}"
-        )
+        assert len(tasks) == dag.number_of_nodes(), f"Expected {dag.number_of_nodes()} task nodes from the configured DAG, got {len(tasks)}"
 
     def test_trigger_expressions_match_dag(self, ecflow_server, gfs_ish_lite_config_path):
         """Trigger expressions on task nodes reflect the DAG dependency edges.
@@ -690,9 +688,7 @@ class TestPrefectE2E:
         assert isinstance(gfs_data, xr.Dataset), f"Expected GFS data to be xr.Dataset, got {type(gfs_data).__name__}"
 
         # Assert MonetIO data is normalized to xarray at ingestion.
-        assert isinstance(ish_lite_data, xr.Dataset), (
-            f"Expected ISH-Lite data to be xr.Dataset, got {type(ish_lite_data).__name__}"
-        )
+        assert isinstance(ish_lite_data, xr.Dataset), f"Expected ISH-Lite data to be xr.Dataset, got {type(ish_lite_data).__name__}"
 
     def test_plotting_invoked_successfully(self, paired_data, tmp_path):
         """Prefect engine plotting stage produces a plot object or saves a file

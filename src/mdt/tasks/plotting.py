@@ -71,7 +71,7 @@ def _format_time_range(data: Union[xr.Dataset, xr.DataArray, Dict[str, Any]]) ->
 
     fmt = "%Y-%m-%d"
     if t0 == t1:
-        return t0.strftime(fmt)
+        return str(t0.strftime(fmt))
     return f"{t0.strftime(fmt)} to {t1.strftime(fmt)}"
 
 
@@ -252,10 +252,13 @@ def generate_plot(
     --------
     >>> fig = generate_plot("my_plot", "spatial", ds, {"savename": "spatial.png"}, track="A")
     """
+
     def normalize(value: Any) -> Any:
         if isinstance(value, dict):
             return {key: normalize(item) for key, item in value.items()}
-        if isinstance(value, (xr.Dataset, xr.DataArray, pd.DataFrame, pd.Series)):
+        # xarray objects need no conversion (to_xarray would return them unchanged),
+        # so only pandas containers are routed through it.
+        if isinstance(value, (pd.DataFrame, pd.Series)):
             return to_xarray(value)
         return value
 
@@ -313,6 +316,7 @@ def _load_plot_modules() -> None:
 
     try:
         import monet_plots.plots as m_plots
+
         for _, module_name, _ in pkgutil.iter_modules(m_plots.__path__):
             try:
                 importlib.import_module(f"monet_plots.plots.{module_name}")
@@ -451,10 +455,12 @@ def _generate_static_plot(
         if columns_spec and len(columns_spec) > 1:
             if plot_type == "profile":
                 import xarray as xr
+
                 var2_val = kwargs.get("var2", "press")
                 first_col, first_label, first_color = columns_spec[0]
 
-                plot_data = data
+                # The multi-column profile path operates on Dataset-like data.
+                plot_data = cast(xr.Dataset, data)
                 # Preserve 1D vertical sounding coordinates and variables before taking temporal mean over valid_time
                 preserved_vars = {}
                 for c in ("press", "temp"):
@@ -527,9 +533,11 @@ def _generate_static_plot(
                         # Defense-in-depth: Ensure shapes align before plotting to prevent crashes
                         if plot_data[col].shape != plot_data[var2_val].shape:
                             logger.warning(
-                                "Skipping overlay plot for column '%s' because its shape %s "
-                                "does not match vertical coordinate '%s' shape %s.",
-                                col, plot_data[col].shape, var2_val, plot_data[var2_val].shape
+                                "Skipping overlay plot for column '%s' because its shape %s does not match vertical coordinate '%s' shape %s.",
+                                col,
+                                plot_data[col].shape,
+                                var2_val,
+                                plot_data[var2_val].shape,
                             )
                             continue
                         plot_obj.ax.plot(plot_data[col], plot_data[var2_val], label=label, color=color if color else "red")
@@ -542,6 +550,7 @@ def _generate_static_plot(
                         plot_obj.ax.set_yscale("log")
                         plot_obj.ax.invert_yaxis()
                         import matplotlib.ticker as ticker
+
                         plot_obj.ax.yaxis.set_major_formatter(ticker.ScalarFormatter())
                         plot_obj.ax.yaxis.set_minor_formatter(ticker.NullFormatter())
                         logger.info("Configured logarithmic and reversed vertical pressure coordinate on profile plot Y-axis.")

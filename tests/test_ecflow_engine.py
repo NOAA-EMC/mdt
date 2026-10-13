@@ -297,9 +297,7 @@ def full_pipeline_dag():
     g = nx.DiGraph()
     g.add_node("load_obs", task_type="load_data", name="obs", dataset_type="aeronet", kwargs={})
     g.add_node("load_model", task_type="load_data", name="model", dataset_type="merra2", kwargs={})
-    g.add_node(
-        "pair_obs_model", task_type="pair_data", name="obs_model", source_name="obs", target_name="model", kwargs={}
-    )
+    g.add_node("pair_obs_model", task_type="pair_data", name="obs_model", source_name="obs", target_name="model", kwargs={})
     g.add_node("combine_all", task_type="combine_paired_data", name="all", sources=["obs_model"], kwargs={})
     g.add_node("stats_bias", task_type="compute_statistics", name="bias", kwargs={}, metrics=["mb", "rmse"])
     g.add_node("plot_spatial", task_type="generate_plot", name="spatial", kwargs={}, plot_type="spatial")

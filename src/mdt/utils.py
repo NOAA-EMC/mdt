@@ -76,8 +76,17 @@ def to_xarray(obj: Any) -> Union[xr.Dataset, xr.DataArray]:
                     frame[coord] = parsed
         dataset = xr.Dataset.from_dataframe(frame)
         coordinate_names = {
-            "time", "valid_time", "lat", "lon", "latitude", "longitude",
-            "station", "station_id", "site", "site_id", "id",
+            "time",
+            "valid_time",
+            "lat",
+            "lon",
+            "latitude",
+            "longitude",
+            "station",
+            "station_id",
+            "site",
+            "site_id",
+            "id",
         }
         coords = [name for name in frame.columns if name.lower() in coordinate_names]
         if coords:

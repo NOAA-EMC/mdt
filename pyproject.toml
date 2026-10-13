@@ -115,7 +115,11 @@ convention = "numpy"
 ]
 
 [tool.mypy]
-python_version = "3.11"
+# Target 3.12: numpy's type stubs (pulled in transitively via pandas-stubs) use
+# PEP 695 `type` statements and PEP 696 TypeVar defaults, which mypy only parses
+# when targeting Python >=3.12. Ruff still enforces the py311 syntax floor for our
+# own code, so 3.11 runtime support is preserved.
+python_version = "3.12"
 exclude = "^tests/"
 warn_return_any = true
 warn_unused_configs = true
@@ -151,6 +155,7 @@ module = [
     "prefect.*",
     "prefect_dask.*",
     "ecflow.*",
+    "esmpy.*",
     "icechunk.*",
     "pandas.*",
     "matplotlib.*",

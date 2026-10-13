@@ -74,10 +74,12 @@ def test_plot_title_computes_requested_metric_lazily(mocker):
 
     from mdt.tasks.plotting import _build_plot_title
 
-    data = xr.Dataset({
-        "obs": ("x", da.from_array(np.array([1.0, 2.0]), chunks=1)),
-        "mod": ("x", da.from_array(np.array([2.0, 4.0]), chunks=1)),
-    })
+    data = xr.Dataset(
+        {
+            "obs": ("x", da.from_array(np.array([1.0, 2.0]), chunks=1)),
+            "mod": ("x", da.from_array(np.array([2.0, 4.0]), chunks=1)),
+        }
+    )
     title = _build_plot_title("comparison", "scatter", data, {"col1": "obs", "col2": "mod"}, None, "rmse")
     assert "RMSE=1.581" in title
 
@@ -88,8 +90,12 @@ def test_generic_plot_title_does_not_compute_a_default_stat(mocker):
 
     mocker.patch.object(plotting, "_compute_global_stat", side_effect=AssertionError("unexpected metric computation"))
     title = plotting._build_plot_title(
-        "comparison", "scatter", pd.DataFrame({"obs": [1], "mod": [2]}),
-        {"col1": "obs", "col2": "mod"}, None, None,
+        "comparison",
+        "scatter",
+        pd.DataFrame({"obs": [1], "mod": [2]}),
+        {"col1": "obs", "col2": "mod"},
+        None,
+        None,
     )
     assert title == "mod vs obs"
 

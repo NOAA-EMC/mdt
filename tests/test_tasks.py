@@ -211,5 +211,3 @@ def test_pair_data_preserves_point_observation_times(mocker):
 
     # Verify that duplicate times are preserved (length remains 3, not collapsed to 1)
     assert len(res["time"]) == 3
-
-

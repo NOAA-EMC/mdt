@@ -201,9 +201,7 @@ class EcFlowEngine(Engine):
         self.port: int = int(exec_cfg.get("ecflow_port", 3141))
         self.suite_name: str = exec_cfg.get("suite_name", "mdt")
         self.task_script_dir: str = exec_cfg.get("task_script_dir", "./ecflow_tasks/")
-        data_root = Path(
-            exec_cfg.get("ecflow_data_dir", Path(self.task_script_dir) / self.suite_name / "data")
-        ).expanduser().resolve()
+        data_root = Path(exec_cfg.get("ecflow_data_dir", Path(self.task_script_dir) / self.suite_name / "data")).expanduser().resolve()
         self.data_dir = data_root / uuid.uuid4().hex
         self.python_executable: str = sys.executable
         self.poll_interval: float = float(exec_cfg.get("ecflow_poll_interval", 5))

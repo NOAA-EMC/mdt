@@ -3,8 +3,9 @@ import os
 import threading
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Iterator
 
+import numpy as np
 import pandas as pd
 import xarray as xr
 
@@ -15,7 +16,7 @@ _ICECHUNK_ENV_LOCK = threading.RLock()
 
 
 @contextmanager
-def _icechunk_retry_environment(max_attempts: int):
+def _icechunk_retry_environment(max_attempts: int) -> Iterator[None]:
     """Set Icechunk's AWS retry setting temporarily and restore the process environment."""
     with _ICECHUNK_ENV_LOCK:
         old_value = os.environ.get("AWS_MAX_ATTEMPTS")
@@ -175,15 +176,16 @@ def load_data(
 
         # Dynamically calculate wind speed if U and V wind components are present
         import numpy as np
+
         if "UGRD" in loaded_obj.variables and "VGRD" in loaded_obj.variables:
             if "WSPD_10maboveground" not in loaded_obj.variables:
-                loaded_obj["WSPD_10maboveground"] = np.sqrt(loaded_obj["UGRD"]**2 + loaded_obj["VGRD"]**2)
+                loaded_obj["WSPD_10maboveground"] = np.sqrt(loaded_obj["UGRD"] ** 2 + loaded_obj["VGRD"] ** 2)
                 loaded_obj["WSPD_10maboveground"].attrs["long_name"] = "Wind Speed"
                 loaded_obj["WSPD_10maboveground"].attrs["units"] = "m s-1"
                 logger.info("Dynamically calculated 'WSPD_10maboveground' from UGRD and VGRD for '%s'", name)
         elif "u_wind" in loaded_obj.variables and "v_wind" in loaded_obj.variables:
             if "WSPD_10maboveground" not in loaded_obj.variables:
-                loaded_obj["WSPD_10maboveground"] = np.sqrt(loaded_obj["u_wind"]**2 + loaded_obj["v_wind"]**2)
+                loaded_obj["WSPD_10maboveground"] = np.sqrt(loaded_obj["u_wind"] ** 2 + loaded_obj["v_wind"] ** 2)
                 loaded_obj["WSPD_10maboveground"].attrs["long_name"] = "Wind Speed"
                 loaded_obj["WSPD_10maboveground"].attrs["units"] = "m s-1"
                 logger.info("Dynamically calculated 'WSPD_10maboveground' from u_wind and v_wind for '%s'", name)
@@ -274,7 +276,6 @@ def load_data(
         load_kwargs.pop("icechunk_repo", None)
         return load_kwargs
 
-    import numpy as np
     # Auto-detect if standard Zarr or Icechunk store is already found on disk
     is_icechunk_check = kwargs.get("use_icechunk", False)
     icechunk_url_check = kwargs.get("icechunk_url") or kwargs.get("icechunk_repo", "")
@@ -316,6 +317,7 @@ def load_data(
             if is_icechunk_check:
                 try:
                     import icechunk
+
                     storage = icechunk.local_filesystem_storage(icechunk_url_check)
                     concurrency = kwargs.get("max_concurrent_requests", 4)
                     config = icechunk.RepositoryConfig(max_concurrent_requests=int(concurrency))
@@ -438,8 +440,10 @@ def load_data(
                 if icechunk_url.startswith("s3://"):
                     parts = icechunk_url[5:].split("/", 1)
                     bucket = parts[0]
-                    prefix = parts[1] if len(parts) > 1 else None
-                    storage = icechunk.s3_storage(bucket=bucket, prefix=prefix, region="us-east-1")
+                    # Distinct name: `prefix` is already bound as str by the virtual-chunk
+                    # container loops elsewhere in this function.
+                    s3_prefix = parts[1] if len(parts) > 1 else None
+                    storage = icechunk.s3_storage(bucket=bucket, prefix=s3_prefix, region="us-east-1")
                 else:
                     storage = icechunk.local_filesystem_storage(icechunk_url)
 

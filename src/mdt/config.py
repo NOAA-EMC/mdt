@@ -54,18 +54,14 @@ class ConfigParser:
         section_errors = []
         for section_name in ("data", "pairing", "combine", "statistics", "plots", "reductions", "save", "execution"):
             if section_name in self.config and not isinstance(self.config[section_name], dict):
-                section_errors.append(
-                    f"'{section_name}' section must be a dictionary, got {type(self.config[section_name]).__name__}."
-                )
+                section_errors.append(f"'{section_name}' section must be a dictionary, got {type(self.config[section_name]).__name__}.")
         if section_errors:
             raise ValueError("Configuration validation failed:\n" + "\n".join(f"- {error}" for error in section_errors))
 
         execution_cfg = self.config.get("execution") or {}
         pairing_mode = execution_cfg.get("pairing_mode", "serial")
         if not isinstance(pairing_mode, str) or pairing_mode not in {"serial", "concurrent"}:
-            raise ValueError(
-                f"Configuration validation failed: execution.pairing_mode must be 'serial' or 'concurrent', got {pairing_mode!r}."
-            )
+            raise ValueError(f"Configuration validation failed: execution.pairing_mode must be 'serial' or 'concurrent', got {pairing_mode!r}.")
         clusters = execution_cfg.get("clusters", {})
         if clusters is None:
             clusters = {}
@@ -80,8 +76,7 @@ class ConfigParser:
             mode = cluster_cfg.get("mode", "local")
             if not isinstance(mode, str) or mode.lower() not in valid_modes:
                 raise ValueError(
-                    f"Configuration validation failed: execution.clusters.{cluster_name}.mode must be one of "
-                    f"{sorted(valid_modes)}, got {mode!r}."
+                    f"Configuration validation failed: execution.clusters.{cluster_name}.mode must be one of {sorted(valid_modes)}, got {mode!r}."
                 )
             workers = cluster_cfg.get("workers", 1)
             if isinstance(workers, bool) or not isinstance(workers, int) or workers < 1:
@@ -167,9 +162,7 @@ class ConfigParser:
                     raise ValueError(f"Configuration validation failed: Statistics task '{name}' must specify an 'input' key.")
                 metrics = details.get("metrics")
                 if not isinstance(metrics, list) or not metrics or not all(isinstance(metric, str) and metric.strip() for metric in metrics):
-                    raise ValueError(
-                        f"Configuration validation failed: Statistics task '{name}' must specify a non-empty list of metric names."
-                    )
+                    raise ValueError(f"Configuration validation failed: Statistics task '{name}' must specify a non-empty list of metric names.")
 
         execution_cfg = self.config.get("execution") or {}
         if "ecflow_data_dir" in execution_cfg:
@@ -196,17 +189,14 @@ class ConfigParser:
             for name, details in self.config["reductions"].items():
                 if not isinstance(details, dict):
                     raise ValueError(
-                        f"Configuration validation failed: Reduction task '{name}' must be a dictionary, "
-                        f"got {type(details).__name__}."
+                        f"Configuration validation failed: Reduction task '{name}' must be a dictionary, got {type(details).__name__}."
                     )
                 if "input" not in details or "dim" not in details:
                     raise ValueError(f"Configuration validation failed: Reduction task '{name}' must specify 'input' and 'dim' fields.")
 
         if "save" in self.config:
             if not isinstance(self.config["save"], dict):
-                raise ValueError(
-                    f"Configuration validation failed: 'save' section must be a dictionary, got {type(self.config['save']).__name__}."
-                )
+                raise ValueError(f"Configuration validation failed: 'save' section must be a dictionary, got {type(self.config['save']).__name__}.")
             for name, details in self.config["save"].items():
                 if not isinstance(details, dict):
                     raise ValueError(f"Configuration validation failed: Save task '{name}' must be a dictionary, got {type(details).__name__}.")
@@ -215,8 +205,7 @@ class ConfigParser:
                 backend = details["backend"]
                 if backend not in {"icechunk", "zarr"}:
                     raise ValueError(
-                        f"Configuration validation failed: Save task '{name}': unsupported backend '{backend}'. "
-                        "Supported: 'icechunk', 'zarr'."
+                        f"Configuration validation failed: Save task '{name}': unsupported backend '{backend}'. Supported: 'icechunk', 'zarr'."
                     )
 
         self._validate_region_masking()

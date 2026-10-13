@@ -1,7 +1,7 @@
-import numpy as np
-import pytest
-import xarray as xr
 from unittest.mock import patch
+
+import numpy as np
+import xarray as xr
 
 from mdt.tasks.plotting import _generate_static_plot
 
@@ -14,28 +14,35 @@ class DummyProfilePlot:
         self.var1 = var1
         self.var2 = var2
         self.label = label
-        
+
         class DummyAx:
             def __init__(self):
                 self.yaxis = self
+
             def plot(self, x, y, **kwargs):
                 x_arr = np.asanyarray(x)
                 y_arr = np.asanyarray(y)
                 if x_arr.shape[0] != y_arr.shape[0]:
                     raise ValueError(f"x and y must have same first dimension, but have shapes {x_arr.shape} and {y_arr.shape}")
+
             def set_ylabel(self, val):
                 pass
+
             def set_yscale(self, val):
                 pass
+
             def invert_yaxis(self):
                 pass
+
             def legend(self):
                 pass
+
             def set_major_formatter(self, formatter):
                 pass
+
             def set_minor_formatter(self, formatter):
                 pass
-                
+
             def set_title(self, title):
                 pass
 
@@ -70,7 +77,7 @@ def test_profile_plotting_interpolation_success(mock_find_plot_class):
 
     # Mock variables
     temperature_vals = np.random.rand(2, 41)  # GFS (valid_time, isobaric_surface)
-    temp_vals = np.random.rand(2, 2)          # IGRA (valid_time, level)
+    temp_vals = np.random.rand(2, 2)  # IGRA (valid_time, level)
     press_vals = np.array([[1000, 500], [950, 450]])  # IGRA press (valid_time, level)
 
     ds = xr.Dataset(
@@ -83,16 +90,13 @@ def test_profile_plotting_interpolation_success(mock_find_plot_class):
             "valid_time": valid_times,
             "isobaric_surface": isobaric_surfaces,
             "level": levels,
-        }
+        },
     )
 
     kwargs = {
         "savename": "test_profile_comparison.png",
         "var2": "press",
-        "columns": {
-            "temp": {"label": "IGRA", "color": "black"},
-            "temperature": {"label": "GFS", "color": "red"}
-        }
+        "columns": {"temp": {"label": "IGRA", "color": "black"}, "temperature": {"label": "GFS", "color": "red"}},
     }
 
     # Run _generate_static_plot.
@@ -113,9 +117,9 @@ def test_profile_plotting_defense_in_depth(mock_find_plot_class, caplog):
     levels = np.arange(2)
 
     # Mock variables
-    temp_vals = np.random.rand(2, 2)          # IGRA (valid_time, level)
+    temp_vals = np.random.rand(2, 2)  # IGRA (valid_time, level)
     press_vals = np.array([[1000, 500], [950, 450]])  # IGRA press (valid_time, level)
-    unmatched_vals = np.random.rand(41)       # Mismatching shape (41,) and not named temperature/TMP
+    unmatched_vals = np.random.rand(41)  # Mismatching shape (41,) and not named temperature/TMP
 
     ds = xr.Dataset(
         data_vars={
@@ -126,16 +130,13 @@ def test_profile_plotting_defense_in_depth(mock_find_plot_class, caplog):
         coords={
             "valid_time": valid_times,
             "level": levels,
-        }
+        },
     )
 
     kwargs = {
         "savename": "test_profile_comparison.png",
         "var2": "press",
-        "columns": {
-            "temp": {"label": "IGRA", "color": "black"},
-            "unmatched_var": {"label": "Unmatched", "color": "blue"}
-        }
+        "columns": {"temp": {"label": "IGRA", "color": "black"}, "unmatched_var": {"label": "Unmatched", "color": "blue"}},
     }
 
     # Run _generate_static_plot.
@@ -143,7 +144,7 @@ def test_profile_plotting_defense_in_depth(mock_find_plot_class, caplog):
     res = _generate_static_plot("test_profile", "profile", ds, kwargs)
     assert res is not None
     assert len(DummyProfilePlot.instances) == 1
-    
+
     # Assert warning was logged
     warnings = [rec.message for rec in caplog.records if rec.levelname == "WARNING"]
     assert any("Skipping overlay plot for column 'unmatched_var'" in w for w in warnings)

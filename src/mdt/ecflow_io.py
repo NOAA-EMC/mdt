@@ -38,10 +38,7 @@ def _read_value(directory: Path, manifest: dict[str, Any]) -> Any:
     if kind == "xarray_dataarray":
         return xr.open_zarr(directory / "data.zarr")[manifest["variable"]]
     if kind == "mapping":
-        return {
-            item["key"]: _read_value(directory / f"item-{index}", item["manifest"])
-            for index, item in enumerate(manifest["items"])
-        }
+        return {item["key"]: _read_value(directory / f"item-{index}", item["manifest"]) for index, item in enumerate(manifest["items"])}
     if kind == "none":
         return None
     raise ValueError(f"Unknown ecFlow artifact type: {kind!r}")
