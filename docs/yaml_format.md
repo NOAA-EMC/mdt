@@ -166,9 +166,14 @@ Configure how and where tasks are executed.
 
 *   **`default_cluster`**: The name of the cluster to use for tasks (defaults to `compute`).
 *   **`clusters`**: A dictionary of cluster definitions.
+*   **`pairing_mode`**: Local pairing scheduling mode: `serial` (default) avoids concurrent ESMF calls; `concurrent` allows independent pairing tasks to run in parallel. Task dependencies are respected in both modes.
+*   **`ecflow_poll_interval`**: Seconds between ecFlow status checks (default: `5`; must be positive).
+*   **`ecflow_timeout`**: Maximum seconds to wait for an ecFlow suite (default: `86400`, one day). Set to `null` for an unbounded wait.
+*   **`ecflow_data_dir`**: Shared POSIX root for intermediate ecFlow task artifacts. Defaults to `<task_script_dir>/<suite_name>/data`; MDT creates a unique run directory beneath it. Every ecFlow execution node must see the same path. Xarray results use Zarr; non-data plot outputs are not handed to downstream tasks.
 
 ```yaml
 execution:
+  pairing_mode: serial  # Use concurrent only when parallel ESMF pairing is supported in your environment.
   default_cluster: "local_cpu"
   clusters:
     local_cpu:

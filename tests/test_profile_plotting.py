@@ -1,3 +1,4 @@
+from typing import ClassVar
 from unittest.mock import patch
 
 import numpy as np
@@ -7,7 +8,9 @@ from mdt.tasks.plotting import _generate_static_plot
 
 
 class DummyProfilePlot:
-    instances = []
+    """Stand-in plot class that records constructor calls for assertions."""
+
+    instances: ClassVar[list] = []
 
     def __init__(self, data, var1, var2, label, **kwargs):
         self.data = data

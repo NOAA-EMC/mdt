@@ -17,13 +17,15 @@ pip install git+https://github.com/bbakernoaa/monet.git@feature/interp_improveme
 pip install git+https://github.com/noaa-oar-arl/monet-stats
 pip install git+https://github.com/bbakernoaa/monet-plots.git --no-deps
 
-# Install MDT and its direct dependencies
+# Install MDT with its local Prefect and Dask execution dependencies
 git clone https://github.com/noaa-oar-arl/mvs.git
 cd mvs
-pip install -e .
+pip install -e '.[prefect,dask]'
 ```
 
-> **Note:** MDT also requires `pyarrow` for Dask/Pandas compatibility.
+For development, install `pip install -e '.[prefect,dask,dev]'`. MDT's `prefect` and `dask` extras provide the respective optional runtime packages. MDT does not publish an `ecflow` extra: ecFlow Python bindings and the client are provided by the operational environment.
+
+The default pairing mode is `serial` to avoid concurrent ESMF calls. Set `execution.pairing_mode: concurrent` only when parallel ESMF pairing is supported in your environment.
 
 ## Running MDT
 

@@ -165,3 +165,14 @@ cython_debug/
 # ESMF log files
 PET*.ESMF_LogFile
 **/zarr_stores
+
+# AI agents
+.agents/
+.github/skills/
+.github/prompts/
+docs/superpowers/
+.specify/
+specs/
+
+# ecflow
+ecflow_tasks/
