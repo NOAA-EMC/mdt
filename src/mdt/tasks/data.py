@@ -384,8 +384,8 @@ def load_data(
                         for t in store_times:
                             try:
                                 store_dates_set.add(pd.to_datetime(t).date())
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                logger.debug("Skipping unparseable time coordinate value %r in existing store: %s", t, e)
 
                         if requested_dates_set:
                             missing_dates = requested_dates_set - store_dates_set
@@ -407,8 +407,8 @@ def load_data(
                 finally:
                     try:
                         ds_check.close()
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("Ignored error while closing the existing-store pre-check dataset: %s", e)
 
         if auto_use_existing:
             kwargs["existing_zarr"] = True
