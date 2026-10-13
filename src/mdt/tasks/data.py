@@ -73,6 +73,10 @@ def load_data(
     # branch on a pandas representation.
     kwargs["as_xarray"] = True
 
+    # Force as_xarray=True for AERONET dataset type
+    if dataset_type == "aeronet":
+        kwargs["as_xarray"] = True
+
     # Extract optional isel / sel dictionary for general dimension subsetting
     isel_dict = kwargs.pop("isel", None)
     sel_dict = kwargs.pop("sel", None)
@@ -82,9 +86,20 @@ def load_data(
 
     def _apply_subsets(loaded_obj: xr.Dataset | xr.DataArray) -> xr.Dataset | xr.DataArray:
         """Apply optional index-based (isel) or coordinate-based (sel) dimension slicing and generic post-processing."""
+        if dataset_type == "aeronet" and isinstance(loaded_obj, pd.DataFrame):
+            logger.info("Converting AERONET DataFrame '%s' to xarray Dataset.", name)
+            if loaded_obj.index.has_duplicates:
+                loaded_obj = loaded_obj.loc[~loaded_obj.index.duplicated(keep="first")]
+            loaded_obj = loaded_obj.to_xarray()
+
         if not isinstance(loaded_obj, xr.Dataset):
             return loaded_obj
 
+        # Standardize time coordinate name: map "valid_time" to "time" if "time" is not present
+        if "valid_time" in loaded_obj.coords or "valid_time" in loaded_obj.dims:
+            if "time" not in loaded_obj.coords and "time" not in loaded_obj.dims:
+                loaded_obj = loaded_obj.rename({"valid_time": "time"})
+                logger.info("Automatically mapped coordinate/dimension 'valid_time' to 'time' for '%s'.", name)
         # Apply generic variable/coordinate renaming
         if rename_dict is not None and isinstance(rename_dict, dict):
             # Support both list and dataset variables/coordinates
@@ -173,6 +188,21 @@ def load_data(
                 loaded_obj["WSPD_10maboveground"].attrs["units"] = "m s-1"
                 logger.info("Dynamically calculated 'WSPD_10maboveground' from u_wind and v_wind for '%s'", name)
 
+        if isinstance(loaded_obj, xr.Dataset):
+            if len(loaded_obj.variables) == 0:
+                raise ValueError(
+                    f"Loaded dataset '{name}' is empty (contains 0 variables/dimensions). "
+                    f"This can happen if the requested date range has no matching files on the server, "
+                    f"or if filters excluded all variables."
+                )
+        elif isinstance(loaded_obj, pd.DataFrame):
+            if loaded_obj.empty:
+                raise ValueError(
+                    f"Loaded dataset '{name}' is empty (DataFrame contains 0 rows). "
+                    f"This can happen if the requested date range has no matching files on the server, "
+                    f"or if filters excluded all data."
+                )
+
         return loaded_obj
 
     def _prefer_xarray_result(
@@ -244,6 +274,7 @@ def load_data(
         load_kwargs.pop("icechunk_repo", None)
         return load_kwargs
 
+    import numpy as np
     # Auto-detect if standard Zarr or Icechunk store is already found on disk
     is_icechunk_check = kwargs.get("use_icechunk", False)
     icechunk_url_check = kwargs.get("icechunk_url") or kwargs.get("icechunk_repo", "")
@@ -265,9 +296,122 @@ def load_data(
                     auto_use_existing = True
 
         if auto_use_existing:
+            # Gather requested dates to check them against the existing store
+            requested_dates_str = []
+            req_dates = kwargs.get("dates") or kwargs.get("date")
+            if req_dates:
+                if isinstance(req_dates, str):
+                    requested_dates_str = [req_dates]
+                elif isinstance(req_dates, (list, tuple)):
+                    requested_dates_str = [str(d) for d in req_dates]
+                elif isinstance(req_dates, pd.DatetimeIndex):
+                    requested_dates_str = [d.strftime("%Y-%m-%d") for d in req_dates]
+
+            try:
+                requested_dates_set = {pd.to_datetime(d).date() for d in requested_dates_str}
+            except Exception:
+                requested_dates_set = set()
+
+            ds_check = None
+            if is_icechunk_check:
+                try:
+                    import icechunk
+                    storage = icechunk.local_filesystem_storage(icechunk_url_check)
+                    concurrency = kwargs.get("max_concurrent_requests", 4)
+                    config = icechunk.RepositoryConfig(max_concurrent_requests=int(concurrency))
+                    net_timeout = int(kwargs.get("network_timeout", 60))
+                    s3_conf = icechunk.s3_store(
+                        anonymous=True,
+                        region="us-east-1",
+                        network_stream_timeout_seconds=net_timeout,
+                    )
+                    prefixes = [
+                        "s3://noaa-gefs-pds/",
+                        "s3://noaa-gfs-bdp-pds/",
+                        "s3://noaa-ufs-pds/",
+                    ]
+                    for prefix in prefixes:
+                        container = icechunk.VirtualChunkContainer(
+                            url_prefix=prefix,
+                            store=s3_conf,
+                        )
+                        config.set_virtual_chunk_container(container)
+                    authorize = {prefix: None for prefix in prefixes}
+                    repo = icechunk.Repository.open(
+                        storage,
+                        config=config,
+                        authorize_virtual_chunk_access=authorize,
+                    )
+                    session = repo.readonly_session(branch="main")
+                    ds_check = xr.open_zarr(session.store, consolidated=False)
+                except Exception as e:
+                    logger.info("Failed to open existing local icechunk store during pre-check: %s. Forcing retrieval.", e)
+                    auto_use_existing = False
+            else:
+                try:
+                    ds_check = xr.open_zarr(store_path_check)
+                except Exception as e:
+                    logger.info("Failed to open existing standard Zarr store during pre-check: %s. Forcing retrieval.", e)
+                    auto_use_existing = False
+
+            if auto_use_existing and ds_check is not None:
+                try:
+                    time_coord = None
+                    # First try exact matches in order of preference
+                    for candidate in ["time", "valid_time", "dates", "date", "valid_date", "reference_time"]:
+                        if candidate in ds_check.coords or candidate in ds_check.dims:
+                            time_coord = candidate
+                            break
+
+                    # If no exact match, look for any coordinate containing "time" or "date"
+                    if time_coord is None:
+                        for coord in ds_check.coords:
+                            if "time" in str(coord).lower() or "date" in str(coord).lower():
+                                time_coord = coord
+                                break
+
+                    if time_coord is None:
+                        logger.info("No time/date coordinate found in existing store during pre-check. Forcing retrieval.")
+                        auto_use_existing = False
+                    else:
+                        store_times = ds_check[time_coord].values
+                        if not isinstance(store_times, (list, tuple, np.ndarray, pd.DatetimeIndex)):
+                            store_times = [store_times]
+
+                        store_dates_set = set()
+                        for t in store_times:
+                            try:
+                                store_dates_set.add(pd.to_datetime(t).date())
+                            except Exception:
+                                pass
+
+                        if requested_dates_set:
+                            missing_dates = requested_dates_set - store_dates_set
+                            if missing_dates:
+                                logger.info(
+                                    "Existing store is missing requested dates: %s. Forcing retrieval.",
+                                    sorted(list(missing_dates)),
+                                )
+                                auto_use_existing = False
+                            else:
+                                logger.info("All requested dates are present in the existing store.")
+                        else:
+                            if not store_dates_set:
+                                logger.info("Existing store appears to be empty. Forcing retrieval.")
+                                auto_use_existing = False
+                except Exception as e:
+                    logger.info("Error checking dates in existing store: %s. Forcing retrieval.", e)
+                    auto_use_existing = False
+                finally:
+                    try:
+                        ds_check.close()
+                    except Exception:
+                        pass
+
+        if auto_use_existing:
             kwargs["existing_zarr"] = True
             logger.info(
-                "Auto-detected existing %s store at '%s'. Bypassing monetio reloading.",
+                "Auto-detected existing %s store at '%s' with all requested dates. Bypassing monetio reloading.",
                 "icechunk" if is_icechunk_check else "zarr",
                 icechunk_url_check if is_icechunk_check else store_path_check,
             )
@@ -442,6 +586,13 @@ def save_data(
 
     if not isinstance(data, (xr.Dataset, xr.DataArray)):
         raise TypeError(f"Only xarray Dataset or DataArray objects can be saved, got {type(data).__name__}")
+
+    # Clear variable and coordinate encodings to prevent write failures
+    # from decode-only backend codecs (such as grib2io/Grib2SerializerCodec) when writing to Zarr.
+    data = data.copy(deep=False)
+    for var in list(data.variables):
+        data[var].encoding = {}
+    data.encoding = {}
 
     import pathlib
     import shutil

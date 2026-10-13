@@ -11,7 +11,7 @@ class TestSaveData(unittest.TestCase):
     def setUp(self):
         # Create a temporary directory for test stores
         self.test_dir = tempfile.mkdtemp()
-        
+
         # Create a mock/dummy dataset
         self.ds = xr.Dataset(
             {
@@ -30,10 +30,10 @@ class TestSaveData(unittest.TestCase):
 
     def test_save_zarr_success(self):
         url = os.path.join(self.test_dir, "test_store.zarr")
-        
+
         # Save to Zarr
         save_data(name="test_zarr_task", data=self.ds, backend="zarr", url=url)
-        
+
         # Verify Zarr store exists and matches original data
         self.assertTrue(os.path.exists(url))
         ds_loaded = xr.open_zarr(url)
@@ -46,18 +46,18 @@ class TestSaveData(unittest.TestCase):
             self.skipTest("icechunk not installed")
 
         url = os.path.join(self.test_dir, "test_store_icechunk")
-        
+
         # Save to Icechunk
         save_data(name="test_icechunk_task", data=self.ds, backend="icechunk", url=url)
-        
+
         # Verify repository was committed to
         self.assertTrue(os.path.exists(url))
-        
+
         storage = icechunk.local_filesystem_storage(url)
         repo = icechunk.Repository.open(storage)
         session = repo.readonly_session(branch="main")
         ds_loaded = xr.open_zarr(session.store, consolidated=False)
-        
+
         xr.testing.assert_equal(self.ds["temperature"], ds_loaded["temperature"])
 
     def test_save_invalid_backend(self):

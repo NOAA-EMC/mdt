@@ -2,14 +2,14 @@ data:
   gefs_model:
     type: "gefs"
     kwargs:
-      start_date: "2023-08-01"
-      end_date: "2023-08-04"
+      start_date: "2025-08-01"
+      end_date: "2025-08-31"
       product: "aerosol"
       lead_time: [0, 3, 6, 9, 12, 15, 18, 21]
       # grib2io/xarray backend filtering compatible with PR 246 workflows
       filters:
         typeOfFirstFixedSurface: 10 # Entire atmosphere aerosol variables
-        shortName: ["totAOD550"]
+        shortName: "totAOD550"
     zarr_store:
       enabled: true
       backend: "icechunk"
@@ -23,20 +23,28 @@ data:
     type: "aeronet"
     kwargs:
       # AERONET data are retrieved from remote source (no local zarr required).
-      start_date: "2023-08-01"
-      end_date: "2023-08-04"
+      start_date: "2025-08-01"
+      end_date: "2025-08-31"
       # Chunk long ranges to reduce risk of remote endpoint resets/timeouts.
       n_chunks: 4
       retries: 8
       backoff_factor: 1.5
       interp_to_aod_values: [550., 670.]
       freq: "h"
+    zarr_store:
+      enabled: true
+      backend: "icechunk"
+      # Local Icechunk destination for virtual references.
+      icechunk_url: "./zarr_stores/aeronet_icechunk"
+      max_scan_attempts: 5
+      network_timeout: 300.0
+      max_concurrent_requests: 4
 
 pairing:
   pair_gefs_aeronet:
     source: "gefs_model"
     target: "aeronet_obs"
-    method: "nearest"
+    method: "bilinear"
 
 statistics:
   aod_stats:
@@ -104,3 +112,14 @@ plots:
       col1: "aod_550nm"
       col2: "totAOD550"
       label1: "GEFS vs AERONET AOD"
+
+save:
+  save_aeronet_obs:
+    input: "aeronet_obs"
+    backend: "zarr"
+    url: "./zarr_stores/aeronet_obs_saved.zarr"
+
+  save_paired_data:
+    input: "pair_gefs_aeronet"
+    backend: "zarr"
+    url: "./zarr_stores/pair_gefs_aeronet_saved.zarr"
