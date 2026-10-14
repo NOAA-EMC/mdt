@@ -1,0 +1,72 @@
+# Vertical and Site-Averaged Profiling: GFS vs IGRA Radiosonde Network
+# 
+# Demonstrates multi-dimensional reductions inside the MDT pipeline.
+# Pairs 3D pressure-level GFS forecasts against vertical radiosonde profiles, 
+# averages over both vertical and spatial dimensions, and plots the resulting 
+# timeseries at each valid forecast step.
+
+data:
+  gfs_model:
+    type: "gfs"
+    kwargs:
+      dates: "2023-08-01"
+      lead_time: [0, 6, 12, 18, 24]
+      # GFS temperature on isobaric (pressure) surfaces (type 100)
+      filters:
+        shortName: "TMP"
+        typeOfFirstFixedSurface: 100
+      rename:
+        temperature: "temperature" # Kept as is or rename if needed, but wait: we can map TMP -> temperature
+        TMP: "temperature"
+      offset:
+        temperature: -273.15      # Kelvin to Celsius
+    zarr_store:
+      enabled: true
+      backend: "icechunk"
+      icechunk_url: "./zarr_stores/gfs_pressure_icechunk"
+      max_scan_attempts: 5
+      network_timeout: 60.0
+      max_concurrent_requests: 16
+
+  igra2_obs:
+    type: "igra2"
+    kwargs:
+      dates: "2023-08-01"
+      site: "USM00072201"
+
+pairing:
+  pair_gfs_igra:
+    source: "gfs_model"
+    target: "igra2_obs"
+    method: "nearest"
+
+reductions:
+  gfs_igra_profile_average:
+    input: "pair_gfs_igra"
+    method: "mean"
+    # Collapses ONLY the spatial station dimensions, keeping vertical levels intact
+    dim: "node"
+
+statistics:
+  profile_stats:
+    input: "gfs_igra_profile_average"
+    metrics: ["rmse", "mb", "mae", "r2"]
+    kwargs:
+      obs_var: "temp"                 # IGRA2 temperature variable
+      mod_var: "temperature"          # GFS temperature variable
+      savename: "gfs_igra_profile_stats.md"
+
+plots:
+  vertical_profile_comparison:
+    input: "gfs_igra_profile_average"
+    type: "profile"
+    kwargs:
+      savename: "gfs_igra_profile_comparison.png"
+      var2: "press"                  # Pressure Level on Y-axis
+      columns:
+        temp:
+          label: "IGRA"
+          color: "black"
+        temperature:
+          label: "GFS"
+          color: "red"

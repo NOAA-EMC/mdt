@@ -32,8 +32,10 @@ pip install git+https://github.com/bbakernoaa/monet-plots.git --no-deps
 # Install MDT
 git clone https://github.com/noaa-oar-arl/mvs.git
 cd mvs
-pip install -e .
+pip install -e '.[prefect,dask]'
 ```
+
+The base install (`pip install -e .`) includes MDT's core dependencies. Add `prefect` for the Prefect runner and `dask` for local distributed or HPC execution; use `pip install -e '.[prefect,dask,dev]'` in a development environment. MDT does not publish an `ecflow` extra. ecFlow Python bindings and the client are supplied by the operational environment where the ecFlow server runs.
 
 ## Quick Start
 

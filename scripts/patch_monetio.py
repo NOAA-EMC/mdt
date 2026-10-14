@@ -9,13 +9,12 @@ Run this script once to apply patches to the installed monetio package.
 """
 
 import os
-import re
 import shutil
 
 DRIVERS_PATH = "/opt/homebrew/Caskroom/miniforge/base/envs/mdt/lib/python3.14/site-packages/monetio/readers/drivers.py"
 
 
-def patch_xarray_driver():
+def patch_xarray_driver() -> bool:
     """Patch XarrayDriver.open to download S3 files locally when using grib2io engine."""
     with open(DRIVERS_PATH) as f:
         content = f.read()
@@ -86,7 +85,7 @@ def patch_xarray_driver():
     return True
 
 
-def patch_pandas_driver():
+def patch_pandas_driver() -> bool:
     """Patch PandasDriver.open to skip missing S3 files instead of failing."""
     with open(DRIVERS_PATH) as f:
         content = f.read()
@@ -179,7 +178,7 @@ def patch_pandas_driver():
     return True
 
 
-def add_os_import():
+def add_os_import() -> None:
     """Ensure 'import os' is at the top of the file."""
     with open(DRIVERS_PATH) as f:
         content = f.read()

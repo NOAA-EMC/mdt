@@ -106,7 +106,10 @@ def _register_ecflow() -> Type[Engine]:
     try:
         from mdt.ecflow_engine import EcFlowEngine
     except ImportError as e:
-        raise ImportError("ecFlow is not installed. Install with: pip install mdt[ecflow]") from e
+        raise ImportError(
+            "ecFlow Python bindings are not installed. MDT does not provide an ecFlow extra; install the ecFlow client package "
+            "through your site's operational environment and ensure its Python bindings are available."
+        ) from e
     return EcFlowEngine
 
 

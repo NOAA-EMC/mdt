@@ -7,6 +7,7 @@ import xarray as xr
 from mdt.utils import discover_spatial_dims, update_history
 
 logger = logging.getLogger(__name__)
+_REDUCTION_METHODS = {"mean", "max", "min", "std", "sum"}
 
 
 def spatial_mean(
@@ -81,6 +82,15 @@ def calculate_reduction(
         If an unsupported reduction method is provided.
     """
     logger.info("Calculating reduction: %s over dim: %s", method, dim)
+    if not isinstance(method, str) or method not in _REDUCTION_METHODS:
+        raise ValueError(f"Unsupported reduction method '{method}'. Supported methods: {sorted(_REDUCTION_METHODS)}")
+    if dim is not None:
+        requested_dims = [dim] if isinstance(dim, str) else dim
+        if not isinstance(requested_dims, list) or not requested_dims or not all(isinstance(item, str) for item in requested_dims):
+            raise ValueError("Reduction dim must be a dimension name or a non-empty list of dimension names.")
+        missing_dims = [item for item in requested_dims if item not in obj.dims]
+        if missing_dims:
+            raise ValueError(f"Unknown reduction dimension(s): {', '.join(missing_dims)}. Available: {list(obj.dims)}")
     method_str = method
 
     # 1. Specialized Case: Area-Weighted Spatial Mean

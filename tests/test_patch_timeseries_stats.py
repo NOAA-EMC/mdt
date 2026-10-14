@@ -12,10 +12,7 @@ Requirements: 7.1, 7.3, 7.4
 
 import textwrap
 
-import pytest
-
 from scripts.patch_timeseries_stats import apply_patch, is_already_patched
-
 
 # ---------------------------------------------------------------------------
 # Fixtures: simulated TimeSeriesStatsPlot source files
@@ -180,9 +177,7 @@ class TestApplyPatch:
         # verify the count stays at 1 for each assignment
         second_pass = apply_patch(first_pass)
         col1_count = second_pass.count("self.col1 = col1")
-        col2_count = second_pass.count(
-            "self.col2 = [col2] if isinstance(col2, str) else col2"
-        )
+        col2_count = second_pass.count("self.col2 = [col2] if isinstance(col2, str) else col2")
         # Note: apply_patch inserts unconditionally, but main() guards with
         # is_already_patched. The key idempotency guarantee is that
         # is_already_patched detects the patched state correctly.
@@ -199,9 +194,7 @@ class TestApplyPatch:
         assert is_already_patched(patched) is True
         # In main(), this would cause early return. Verify the content is stable.
         col1_count = patched.count("self.col1 = col1")
-        col2_count = patched.count(
-            "self.col2 = [col2] if isinstance(col2, str) else col2"
-        )
+        col2_count = patched.count("self.col2 = [col2] if isinstance(col2, str) else col2")
         assert col1_count == 1, f"Expected 1 self.col1 assignment, found {col1_count}"
         assert col2_count == 1, f"Expected 1 self.col2 assignment, found {col2_count}"
 
@@ -246,7 +239,4 @@ class TestApplyPatch:
 
         assert normalize_indent is not None
         assert col1_indent is not None
-        assert col1_indent == normalize_indent, (
-            f"Indentation mismatch: normalize_data={normalize_indent}, "
-            f"col1={col1_indent}"
-        )
+        assert col1_indent == normalize_indent, f"Indentation mismatch: normalize_data={normalize_indent}, col1={col1_indent}"

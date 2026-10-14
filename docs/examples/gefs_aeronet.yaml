@@ -2,29 +2,54 @@ data:
   gefs_model:
     type: "gefs"
     kwargs:
-      dates: ["2023-08-01", "2023-09-02"]
+      start_date: "2025-08-01"
+      end_date: "2025-08-31"
       product: "aerosol"
-      lead_time: [0, 3, 6, 9, 12, 15, 18, 21, 24]
-      filters: # grib2io filters
-        typeOfFirstFixedSurface: 10 # Get the Entire Atmosphere variables
+      lead_time: [0, 3, 6, 9, 12, 15, 18, 21]
+      # grib2io/xarray backend filtering compatible with PR 246 workflows
+      filters:
+        typeOfFirstFixedSurface: 10 # Entire atmosphere aerosol variables
+        shortName: "totAOD550"
+    zarr_store:
+      enabled: true
+      backend: "icechunk"
+      # Local Icechunk destination for virtual references.
+      icechunk_url: "./zarr_stores/gefs_aerosol_icechunk"
+      max_scan_attempts: 5
+      network_timeout: 300.0
+      max_concurrent_requests: 4
 
   aeronet_obs:
     type: "aeronet"
     kwargs:
-      dates: ["2023-08-01", "2023-09-02"]
-      interp_to_aod_values: [550., 440., 670., 870., 1020.]
+      # AERONET data are retrieved from remote source (no local zarr required).
+      start_date: "2025-08-01"
+      end_date: "2025-08-31"
+      # Chunk long ranges to reduce risk of remote endpoint resets/timeouts.
+      n_chunks: 4
+      retries: 8
+      backoff_factor: 1.5
+      interp_to_aod_values: [550., 670.]
       freq: "h"
+    zarr_store:
+      enabled: true
+      backend: "icechunk"
+      # Local Icechunk destination for virtual references.
+      icechunk_url: "./zarr_stores/aeronet_icechunk"
+      max_scan_attempts: 5
+      network_timeout: 300.0
+      max_concurrent_requests: 4
 
 pairing:
   pair_gefs_aeronet:
     source: "gefs_model"
     target: "aeronet_obs"
-    method: "nearest"
+    method: "bilinear"
 
 statistics:
   aod_stats:
     input: "pair_gefs_aeronet"
-    metrics: ["rmse", "mb", "mae", "mse", "mape", "ioa_m", "fac2", "r2", "d1", "e1", "ac"]
+    metrics: ["rmse", "mb", "mae", "mse", "mape", "ioa_m", "fac2", "r2", "d1", "e1", "ac", "fss", "vets", "wassersteindistance"]
     kwargs:
       obs_var: "aod_550nm"
       mod_var: "totAOD550"
@@ -36,9 +61,16 @@ plots:
     type: "spatial_bias_scatter"
     kwargs:
       savename: "gefs_aeronet_spatial.png"
+      title: "GEFS vs AERONET AOD Comparison"
+      global_stat: "rmse"
+      style: "pivotal_weather"
+      discrete: false
+      cbar_label: "AOD Bias (Model - Obs)"
       col1: "aod_550nm"
       col2: "totAOD550"
       fact: 0.2
+      vmin: -0.5
+      vmax: 0.5
 
   scatter_aod:
     input: "pair_gefs_aeronet"
@@ -56,7 +88,38 @@ plots:
     input: "pair_gefs_aeronet"
     type: "timeseriesstat"
     kwargs:
-      savename: "gefs_aeronet_timeseries_stat.png"
+      savename: "gefs_aeronet_timeseries_bias.png"
       var1: "aod_550nm"
       var2: "totAOD550"
       freq: "3h"
+
+  timeseries_rmse:
+    input: "pair_gefs_aeronet"
+    type: "timeseriesstat"
+    kwargs:
+      savename: "gefs_aeronet_timeseries_rmse.png"
+      var1: "aod_550nm"
+      var2: "totAOD550"
+      freq: "3h"
+      stat: "rmse"
+      markersize: 1
+
+  taylor:
+    input: "pair_gefs_aeronet"
+    type: "taylor"
+    kwargs:
+      savename: "gefs_aeronet_taylor.png"
+      col1: "aod_550nm"
+      col2: "totAOD550"
+      label1: "GEFS vs AERONET AOD"
+
+save:
+  save_aeronet_obs:
+    input: "aeronet_obs"
+    backend: "zarr"
+    url: "./zarr_stores/aeronet_obs_saved.zarr"
+
+  save_paired_data:
+    input: "pair_gefs_aeronet"
+    backend: "zarr"
+    url: "./zarr_stores/pair_gefs_aeronet_saved.zarr"

@@ -54,6 +54,7 @@ def main() -> None:
     logger = logging.getLogger(__name__)
 
     if args.command == "run":
+        engine = None
         try:
             # 1. Load the configuration
             logger.info(f"Loading configuration from {args.config_path}")
@@ -77,16 +78,19 @@ def main() -> None:
 
             logger.info("Workflow execution completed successfully.")
 
-            # Force clean shutdown to avoid segfault from Prefect server threads
-            import os
-            os._exit(0)
-
         except Exception as e:
             if args.debug:
                 logger.exception("Error executing MDT workflow")
             else:
                 logger.error(f"Error executing MDT workflow: {e}")
             sys.exit(1)
+        finally:
+            close = getattr(engine, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception as cleanup_error:
+                    logger.warning("Failed to cleanly close execution engine: %s", cleanup_error)
 
     elif args.command == "validate":
         try:
@@ -114,11 +118,16 @@ def main() -> None:
                 "basic_stats": {"input": "eval_pair", "metrics": ["rmse", "bias", "corr"], "kwargs": {"obs_var": "obs", "mod_var": "mod"}}
             },
             "plots": {"spatial_eval": {"input": "eval_pair", "type": "spatial", "kwargs": {"savename": "spatial_plot.png"}}},
-            "execution": {"default_cluster": "local", "clusters": {"local": {"mode": "local", "workers": 2}}},
+            "execution": {
+                "orchestrator": "prefect",
+                "default_cluster": "local",
+                "pairing_mode": "serial",
+                "clusters": {"local": {"mode": "local", "workers": 1}},
+            },
         }
         try:
             with Path(args.output).open("w") as f:
-                yaml.dump(template, f, sort_keys=False)
+                yaml.safe_dump(template, f, sort_keys=False)
             print(f"Generated template configuration: {args.output}")
         except Exception as e:
             logger.error(f"Failed to generate template: {e}")

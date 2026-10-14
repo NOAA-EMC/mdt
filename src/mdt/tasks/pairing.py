@@ -1,25 +1,108 @@
 import logging
+import threading
 from typing import Any, Dict, Optional, Union, cast
 
 import pandas as pd
 import xarray as xr
 
-from mdt.utils import update_history
+from mdt.utils import to_xarray, update_history
 
 # Monet pairing is usually handled by `monet.models.*` or `monet.obs.*` depending on the object,
 # or through `monet.util.interp_util` regridding.
 
 logger = logging.getLogger(__name__)
+_esmf_thread_state = threading.local()
+
+
+def _ensure_esmf_manager() -> None:
+    """Initialize ESMF manager in the current worker thread when available."""
+    if getattr(_esmf_thread_state, "manager_ready", False):
+        return
+
+    try:
+        import esmpy
+    except ImportError:
+        return
+
+    esmpy.Manager(debug=False)
+    _esmf_thread_state.manager_ready = True
+
+
+def _harmonize_spatial_coordinates(
+    data: Union[xr.Dataset, xr.DataArray],
+) -> Union[xr.Dataset, xr.DataArray]:
+    """Normalize spatial coordinate aliases on paired xarray outputs."""
+    if not isinstance(data, (xr.Dataset, xr.DataArray)):
+        return data
+
+    out: Union[xr.Dataset, xr.DataArray] = data
+
+    has_lat_lon = "lat" in out.coords and "lon" in out.coords
+    has_latitude_longitude = "latitude" in out.coords and "longitude" in out.coords
+
+    # Prefer canonical 1D lat/lon axes when available.
+    if has_lat_lon and has_latitude_longitude:
+        lat = out.coords["lat"]
+        lon = out.coords["lon"]
+        latitude = out.coords["latitude"]
+        longitude = out.coords["longitude"]
+        if lat.ndim == 1 and lon.ndim == 1 and latitude.ndim == 2 and longitude.ndim == 2:
+            out = out.drop_vars(["latitude", "longitude"])
+            return out
+
+    # Provide lat/lon aliases when only latitude/longitude exist as 1D coords.
+    if not has_lat_lon and has_latitude_longitude:
+        latitude = out.coords["latitude"]
+        longitude = out.coords["longitude"]
+        if latitude.ndim == 1 and longitude.ndim == 1:
+            out = out.assign_coords(lat=latitude, lon=longitude)
+
+    return out
+
+
+def _drop_duplicate_time_entries(
+    data: Union[xr.Dataset, xr.DataArray],
+    name: str,
+    role: str,
+) -> Union[xr.Dataset, xr.DataArray]:
+    """Drop duplicate time entries that break xarray alignment during pairing."""
+    if isinstance(data, (xr.Dataset, xr.DataArray)):
+        # Never drop duplicate time entries for point observation datasets (non-gridded)
+        if "y" not in data.dims and "x" not in data.dims:
+            return data
+
+        if "time" in data.indexes:
+            time_index = data.indexes["time"]
+            dup_count = int(time_index.duplicated().sum())
+            if dup_count > 0:
+                if isinstance(data, xr.Dataset) and {"forecast_reference_time", "lead_time"}.issubset(data.coords):
+                    logger.info(
+                        "Dataset '%s' has %d repeated valid times from distinct forecast cycles/leads; preserving all forecast records.",
+                        name,
+                        dup_count,
+                    )
+                    return data
+                logger.warning(
+                    "Dataset '%s' %s contains %d duplicate time values; keeping first occurrence.",
+                    name,
+                    role,
+                    dup_count,
+                )
+                keep_mask = ~time_index.duplicated(keep="first")
+                return data.isel(time=keep_mask)
+        return data
+
+    return data
 
 
 def pair_data(
     name: str,
     method: str,
-    source_data: Union[xr.Dataset, xr.DataArray, pd.DataFrame],
-    target_data: Union[xr.Dataset, xr.DataArray, pd.DataFrame],
+    source_data: Union[xr.Dataset, xr.DataArray, Dict[str, Union[xr.Dataset, xr.DataArray]]],
+    target_data: Union[xr.Dataset, xr.DataArray],
     kwargs: Dict[str, Any],
     mask: Optional[str] = None,
-) -> Union[xr.Dataset, xr.DataArray, pd.DataFrame]:
+) -> Union[xr.Dataset, xr.DataArray]:
     """
     Dynamically pair two datasets using monet.
 
@@ -31,7 +114,7 @@ def pair_data(
         Spatial interpolation method (e.g., 'nearest', 'bilinear', 'conservative').
     source_data : xarray.Dataset or xarray.DataArray
         The source data object (typically a model).
-    target_data : xarray.Dataset or xarray.DataArray or pandas.DataFrame
+    target_data : xarray.Dataset or xarray.DataArray
         The target data object or grid (typically observations).
     kwargs : dict
         Additional keyword arguments for the pairing function (e.g., 'interp_time', 'suffix').
@@ -42,7 +125,7 @@ def pair_data(
 
     Returns
     -------
-    xarray.Dataset or xarray.DataArray or pandas.DataFrame
+    xarray.Dataset or xarray.DataArray
         The resulting paired dataset.
 
     Raises
@@ -61,21 +144,49 @@ def pair_data(
     ...     "my_pairing", "bilinear", model_ds, obs_df, {"interp_time": True}, mask="land"
     ... )
     """
+    if isinstance(source_data, dict):
+        if not source_data:
+            raise ValueError("Multi-model pairing requires at least one source dataset.")
+        dim = kwargs.pop("model_dim", "model")
+        paired = {model: pair_data(name, method, data, target_data, dict(kwargs), mask=mask) for model, data in source_data.items()}
+        combined = combine_paired_data(paired, dim=dim)
+        # Observation fields are shared across models. Collapse fields whose
+        # values are identical for every model; model fields remain model-indexed.
+        if isinstance(combined, xr.Dataset):
+            combined.attrs["mdt_model_dim"] = dim
+            for var in list(combined.data_vars):
+                if dim not in combined[var].dims:
+                    continue
+                first = combined[var].isel({dim: 0}, drop=True)
+                if all(combined[var].isel({dim: i}, drop=True).identical(first) for i in range(1, combined.sizes[dim])):
+                    combined[var] = first
+        return combined
+
     logger.info("Pairing data '%s' using method '%s'", name, method)
+
+    source_data = to_xarray(source_data)
+    target_data = to_xarray(target_data)
 
     import monet
 
     try:
+        _ensure_esmf_manager()
+
         # Drop UGRID 'mesh' variable if present — it causes MergeError in xr.merge
         # when monet tries to merge paired model data with observations.
         # This is a known incompatibility between UGRID-convention datasets and xarray.merge.
         if isinstance(target_data, xr.Dataset) and "mesh" in target_data:
             target_data = target_data.drop_vars("mesh")
 
+        source_xr = cast(Union[xr.Dataset, xr.DataArray], source_data)
+        source_xr = cast(Union[xr.Dataset, xr.DataArray], _drop_duplicate_time_entries(source_xr, name, "source"))
+        target_data = _drop_duplicate_time_entries(target_data, name, "target")
+
         # Use the unified monet.pair interface
-        # This handles both Xarray-to-Xarray and Xarray-to-DataFrame pairing,
-        # maintaining Aero Protocol (laziness).
-        paired_data = monet.util.combinetool.pair(source_data, target_data, method=method, **kwargs)
+        # Preserve xarray inputs through pairing to maintain Aero Protocol laziness.
+        paired_data = monet.util.combinetool.pair(source_xr, target_data, method=method, **kwargs)
+        paired_data = to_xarray(paired_data)
+        paired_data = _harmonize_spatial_coordinates(paired_data)
 
         # Apply region mask if configured
         if mask is not None:
@@ -92,8 +203,13 @@ def pair_data(
         msg = f"Paired using method '{method}' with params {kwargs}."
         paired_data = update_history(paired_data, msg)
 
+        # Sort by time to ensure monotonicity (important for subsequent resampling/plotting)
+        if isinstance(paired_data, xr.Dataset):
+            if "time" in paired_data.dims:
+                paired_data = paired_data.sortby("time")
+                logger.info("Sorted paired xarray dataset by 'time' dimension.")
         logger.info("Successfully paired data '%s'", name)
-        return cast(Union[xr.Dataset, xr.DataArray, pd.DataFrame], paired_data)
+        return cast(Union[xr.Dataset, xr.DataArray], paired_data)
 
     except ImportError as e:
         logger.error("Required package for pairing not found: %s", e)
@@ -104,9 +220,9 @@ def pair_data(
 
 
 def combine_paired_data(
-    paired_data: Dict[str, Union[pd.DataFrame, xr.Dataset, xr.DataArray]],
+    paired_data: Dict[str, Union[xr.Dataset, xr.DataArray]],
     dim: str = "model",
-) -> Union[pd.DataFrame, xr.Dataset, xr.DataArray]:
+) -> Union[xr.Dataset, xr.DataArray]:
     """
     Combines multiple paired datasets into a single dataset.
 
@@ -122,7 +238,7 @@ def combine_paired_data(
 
     Returns
     -------
-    pandas.DataFrame or xarray.Dataset or xarray.DataArray
+    xarray.Dataset or xarray.DataArray
         The combined dataset.
 
     Raises
@@ -135,26 +251,13 @@ def combine_paired_data(
     if not paired_data:
         raise ValueError("No paired data provided for combination.")
 
+    paired_data = {name: to_xarray(data) for name, data in paired_data.items()}
     first_key = next(iter(paired_data))
     first_item = paired_data[first_key]
 
     logger.info(f"Combining {len(paired_data)} paired datasets along dimension '{dim}'")
 
-    if isinstance(first_item, pd.DataFrame):
-        dfs = []
-        for name, df in paired_data.items():
-            if not isinstance(df, pd.DataFrame):
-                raise TypeError(f"Expected DataFrame for '{name}', got {type(df)}")
-            # Avoid modifying the original dataframe in place if checking equality elsewhere
-            df_copy = df.copy()
-            df_copy[dim] = name  # Add the identifier column
-            dfs.append(df_copy)
-
-        # Concatenate all dataframes
-        combined_df = pd.concat(dfs, ignore_index=True)
-        return combined_df
-
-    elif isinstance(first_item, (xr.Dataset, xr.DataArray)):
+    if isinstance(first_item, (xr.Dataset, xr.DataArray)):
         datasets = []
         names = []
         for name, ds in paired_data.items():
@@ -167,7 +270,7 @@ def combine_paired_data(
         # Combine using xarray concatenation along a new dimension
         try:
             # Create the dimension coordinate
-            combined_xr = xr.concat(datasets, dim=pd.Index(names, name=dim))  # type: ignore[arg-type]
+            combined_xr = xr.concat(datasets, dim=pd.Index(names, name=dim))
             return cast(Union[xr.Dataset, xr.DataArray], combined_xr)
         except Exception as e:
             logger.error(f"Failed to combine xarray objects: {e}")

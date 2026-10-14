@@ -21,8 +21,7 @@ def test_gefs_openaq_workflow(mocker):
         {"dust": (("time", "lat", "lon"), np.random.rand(2, 5, 5))}, coords={"time": times, "lat": lats, "lon": lons}, attrs={"history": "Initial"}
     )
 
-    # OpenAQ Mock (Pandas-like DataFrame, but load_data returns what reader gives)
-    # Most obs readers return DataFrames by default, or Xarray if requested.
+    # OpenAQ mock source data is tabular, but its MonetIO reader contract returns xarray.
     openaq_df = pd.DataFrame({"time": [times[0], times[1]], "lat": [40.0, 41.0], "lon": [-100.0, -101.0], "pm25": [10.5, 12.0]})
 
     # 2. Mock monetio.load

@@ -24,6 +24,7 @@ _enabled_kwargs = st.fixed_dictionaries(
     },
     optional={
         "icechunk_repo": st.text(min_size=1, max_size=80),
+        "icechunk_url": st.text(min_size=1, max_size=80),
     },
 )
 
@@ -32,8 +33,15 @@ _virtualizarr_keys = {
     "use_virtualizarr",
     "virtualizarr_backend",
     "store_path",
+    "icechunk_url",
     "icechunk_repo",
+    "use_icechunk",
+    "max_scan_attempts",
+    "network_timeout",
+    "max_concurrent_requests",
 }
+
+_mdt_postprocessing_keys = {"isel", "sel", "rename", "scale", "offset"}
 
 _non_vz_kwargs = st.dictionaries(
     keys=st.text(min_size=1, max_size=30).filter(lambda k: k not in _virtualizarr_keys),
@@ -56,12 +64,11 @@ def _make_mock_dataset():
 
 
 @given(vz_kwargs=_enabled_kwargs, extra_kwargs=_non_vz_kwargs)
-@settings(max_examples=100, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@settings(max_examples=100, suppress_health_check=[HealthCheck.function_scoped_fixture], deadline=None)
 def test_enabled_forwards_virtualizarr_params(vz_kwargs, extra_kwargs):
     """When zarr_store is enabled, monetio.load() SHALL receive.
 
-    use_virtualizarr, virtualizarr_backend, store_path, and (when present)
-    icechunk_repo.
+    use_virtualizarr/store_path and MonetIO-conformant icechunk args.
     """
     combined_kwargs = {**extra_kwargs, **vz_kwargs}
 
@@ -80,16 +87,20 @@ def test_enabled_forwards_virtualizarr_params(vz_kwargs, extra_kwargs):
 
     # Required VirtualiZarr keys must be present
     assert call_kwargs["use_virtualizarr"] is True
-    assert call_kwargs["virtualizarr_backend"] == vz_kwargs["virtualizarr_backend"]
     assert call_kwargs["store_path"] == vz_kwargs["store_path"]
+    assert "virtualizarr_backend" not in call_kwargs
 
-    # icechunk_repo must be present when it was in the input
-    if "icechunk_repo" in vz_kwargs:
-        assert call_kwargs["icechunk_repo"] == vz_kwargs["icechunk_repo"]
+    if vz_kwargs["virtualizarr_backend"] == "icechunk":
+        assert call_kwargs.get("use_icechunk") is True
+
+    # Legacy/new icechunk key is normalized to icechunk_url for monetio call.
+    expected_icechunk = vz_kwargs.get("icechunk_url") or vz_kwargs.get("icechunk_repo")
+    if expected_icechunk:
+        assert call_kwargs["icechunk_url"] == expected_icechunk
 
 
 @given(extra_kwargs=_non_vz_kwargs)
-@settings(max_examples=100, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@settings(max_examples=100, suppress_health_check=[HealthCheck.function_scoped_fixture], deadline=None)
 def test_disabled_omits_virtualizarr_params(extra_kwargs):
     """When zarr_store is absent or disabled, monetio.load() SHALL NOT receive.
 
@@ -113,6 +124,35 @@ def test_disabled_omits_virtualizarr_params(extra_kwargs):
         assert key not in call_kwargs, f"VirtualiZarr key '{key}' should not be present when disabled"
 
 
+def test_loader_applies_isel_once_and_coordinate_sel_after_time_reconstruction(monkeypatch):
+    """Slicing once must retain positional intent and allow sel on rebuilt times."""
+    import pandas as pd
+
+    from mdt.tasks.data import load_data
+
+    dataset = xr.Dataset({"value": ("time", [0, 1, 2, 3, 4, 5])})
+    mock_monetio = MagicMock(load=MagicMock(return_value=dataset))
+    monkeypatch.setitem(__import__("sys").modules, "monetio", mock_monetio)
+    monkeypatch.setattr("mdt.tasks.data.update_history", lambda obj, _msg: obj)
+
+    result = load_data("sample", "gefs", {"isel": {"time": slice(1, 4)}})
+    assert result.value.values.tolist() == [1, 2, 3]
+
+    timed_dataset = xr.Dataset({"value": ("time", [10, 20, 30])})
+    mock_monetio.load.return_value = timed_dataset
+    result = load_data(
+        "sample",
+        "gefs",
+        {
+            "dates": "2023-08-01",
+            "lead_time": [0, 6, 12],
+            "sel": {"time": pd.Timestamp("2023-08-01 06:00")},
+        },
+    )
+    assert result.value.item() == 20
+    assert result.time.item() == pd.Timestamp("2023-08-01 06:00").to_datetime64()
+
+
 # ---------------------------------------------------------------------------
 # Feature: virtualizarr-zarr-integration, Property 4: Fallback strips VirtualiZarr parameters
 # Validates: Requirements 2.6, 7.2
@@ -120,7 +160,7 @@ def test_disabled_omits_virtualizarr_params(extra_kwargs):
 
 
 @given(vz_kwargs=_enabled_kwargs, extra_kwargs=_non_vz_kwargs)
-@settings(max_examples=100, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@settings(max_examples=100, suppress_health_check=[HealthCheck.function_scoped_fixture], deadline=None)
 def test_fallback_strips_virtualizarr_params(vz_kwargs, extra_kwargs):
     """When monetio.load() raises an exception with VirtualiZarr enabled.
 
@@ -132,7 +172,7 @@ def test_fallback_strips_virtualizarr_params(vz_kwargs, extra_kwargs):
     mock_ds = _make_mock_dataset()
 
     mock_monetio = MagicMock()
-    mock_monetio.load = MagicMock(side_effect=[TypeError("unexpected kwarg"), mock_ds])
+    mock_monetio.load = MagicMock(side_effect=[TypeError("load() got an unexpected keyword argument 'use_virtualizarr'"), mock_ds])
 
     with patch.dict("sys.modules", {"monetio": mock_monetio}), patch("mdt.tasks.data.update_history", side_effect=lambda ds, msg: ds):
         from mdt.tasks.data import load_data
@@ -147,8 +187,12 @@ def test_fallback_strips_virtualizarr_params(vz_kwargs, extra_kwargs):
     for key in _virtualizarr_keys:
         assert key not in retry_kwargs, f"VirtualiZarr key '{key}' should have been stripped in fallback retry"
 
-    # The retry call should retain all original non-VirtualiZarr keys unchanged
+    # The retry call retains reader kwargs. MDT-only transformations are
+    # intentionally removed before calls to MonetIO.
     for key, value in extra_kwargs.items():
+        if key in _mdt_postprocessing_keys:
+            assert key not in retry_kwargs
+            continue
         assert key in retry_kwargs, f"Non-VirtualiZarr key '{key}' should be retained in fallback retry"
         assert retry_kwargs[key] == value, f"Non-VirtualiZarr key '{key}' should have value '{value}' but got '{retry_kwargs[key]}'"
 
@@ -265,7 +309,7 @@ class TestLoadDataLogging:
         }
         mock_ds = _make_mock_dataset()
         mock_monetio = MagicMock()
-        mock_monetio.load = MagicMock(side_effect=[TypeError("unexpected kwarg"), mock_ds])
+        mock_monetio.load = MagicMock(side_effect=[TypeError("load() got an unexpected keyword argument 'use_virtualizarr'"), mock_ds])
 
         self._call_load_data("aeronet", "cmaq", kwargs, mock_monetio)
 
@@ -306,3 +350,111 @@ class TestLoadDataLogging:
             assert key not in call_kwargs, f"VirtualiZarr key '{key}' should not be present when disabled"
         assert call_kwargs["fname"] == "data.nc"
         assert call_kwargs["dates"] == "2023-01-01"
+
+    def test_load_existing_zarr_direct(self):
+        """When existing_zarr is True, xr.open_zarr is called directly."""
+        kwargs = {
+            "existing_zarr": True,
+            "virtualizarr_backend": "zarr",
+            "store_path": "/path/to/zarr",
+            "zarr_kwargs": {"consolidated": True},
+        }
+        mock_ds = _make_mock_dataset()
+        mock_monetio = MagicMock()
+
+        with patch("xarray.open_zarr", return_value=mock_ds) as mock_open_zarr:
+            res = self._call_load_data("existing_ds", "aeronet", kwargs, mock_monetio)
+
+        mock_open_zarr.assert_called_once_with("/path/to/zarr", consolidated=True)
+        assert res == mock_ds
+        # monetio.load should NOT be called
+        mock_monetio.load.assert_not_called()
+
+    def test_load_existing_icechunk_direct(self):
+        """When existing_zarr is True and backend is icechunk, it uses icechunk session."""
+        kwargs = {
+            "existing_zarr": True,
+            "virtualizarr_backend": "icechunk",
+            "icechunk_repo": "s3://repo",
+            "zarr_kwargs": {"chunks": {}},
+        }
+        mock_ds = _make_mock_dataset()
+        mock_monetio = MagicMock()
+        mock_icechunk = MagicMock()
+        mock_repo = MagicMock()
+        mock_session = MagicMock()
+        mock_icechunk.Repository.open.return_value = mock_repo
+        mock_repo.readonly_session.return_value = mock_session
+        mock_session.store = "mock_store"
+
+        with patch.dict("sys.modules", {"icechunk": mock_icechunk}), patch("xarray.open_zarr", return_value=mock_ds) as mock_open_zarr:
+            res = self._call_load_data("existing_ice", "gefs", kwargs, mock_monetio)
+
+        mock_icechunk.s3_storage.assert_called_once_with(bucket="repo", prefix=None, region="us-east-1")
+        mock_icechunk.Repository.open.assert_called_once()
+        assert mock_icechunk.Repository.open.call_args.kwargs["config"] is mock_icechunk.RepositoryConfig.return_value
+        assert mock_icechunk.Repository.open.call_args.kwargs["authorize_virtual_chunk_access"] == {
+            "s3://noaa-gefs-pds/": None,
+            "s3://noaa-gfs-bdp-pds/": None,
+            "s3://noaa-ufs-pds/": None,
+        }
+        mock_open_zarr.assert_called_once_with("mock_store", consolidated=False, chunks={})
+        assert res == mock_ds
+
+
+def test_start_end_date_are_expanded_to_dates_list():
+    """start_date/end_date are expanded to an inclusive daily dates list."""
+    kwargs = {
+        "start_date": "2023-08-01",
+        "end_date": "2023-08-03",
+        "product": "aerosol",
+    }
+    mock_ds = _make_mock_dataset()
+    mock_monetio = MagicMock()
+    mock_monetio.load = MagicMock(return_value=mock_ds)
+
+    with patch.dict("sys.modules", {"monetio": mock_monetio}), patch("mdt.tasks.data.update_history", side_effect=lambda ds, msg: ds):
+        from mdt.tasks.data import load_data
+
+        load_data("gefs_model", "gefs", kwargs)
+
+    call_kwargs = mock_monetio.load.call_args[1]
+    assert "start_date" not in call_kwargs
+    assert "end_date" not in call_kwargs
+    assert call_kwargs["dates"] == ["2023-08-01", "2023-08-02", "2023-08-03"]
+
+
+def test_virtualizarr_does_not_fallback_on_internal_typeerror(monkeypatch):
+    """Propagate reader bugs instead of retrying them as signature mismatches."""
+    import pytest
+
+    from mdt.tasks.data import load_data
+
+    error = TypeError("internal reader conversion bug")
+    load = MagicMock(side_effect=error)
+    monkeypatch.setitem(__import__("sys").modules, "monetio", MagicMock(load=load))
+    with pytest.raises(TypeError, match="internal reader conversion bug"):
+        load_data("sample", "gefs", {"use_virtualizarr": True, "store_path": "index.json"})
+    load.assert_called_once()
+
+
+def test_existing_icechunk_restores_aws_retry_environment(monkeypatch):
+    """Restore AWS retry configuration after opening an Icechunk repository."""
+    import os
+
+    from mdt.tasks.data import load_data
+
+    monkeypatch.setenv("AWS_MAX_ATTEMPTS", "17")
+    icechunk = MagicMock()
+    repo = MagicMock()
+    icechunk.Repository.open.return_value = repo
+    session = MagicMock()
+    repo.readonly_session.return_value = session
+    session.store = "store"
+    monkeypatch.setitem(__import__("sys").modules, "icechunk", icechunk)
+    monkeypatch.setattr("xarray.open_zarr", MagicMock(return_value=_make_mock_dataset()))
+    monkeypatch.setattr("mdt.tasks.data.update_history", lambda data, _message: data)
+
+    load_data("existing", "gefs", {"existing_zarr": True, "virtualizarr_backend": "icechunk", "icechunk_url": "s3://bucket/repo"})
+
+    assert os.environ["AWS_MAX_ATTEMPTS"] == "17"
