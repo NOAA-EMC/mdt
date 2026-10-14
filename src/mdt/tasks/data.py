@@ -35,6 +35,104 @@ def _is_unsupported_keyword_type_error(error: TypeError) -> bool:
     return "unexpected keyword argument" in message or "takes no keyword arguments" in message
 
 
+def _is_as_xarray_rejection(error: BaseException) -> bool:
+    """True when a reader refused the ``as_xarray`` option specifically."""
+    if getattr(error, "option", None) == "as_xarray":
+        return True
+    return isinstance(error, TypeError) and "as_xarray" in str(error)
+
+
+def _reader_accepts_as_xarray(dataset_type: str) -> bool:
+    """Return True when the monetio reader for ``dataset_type`` declares ``as_xarray``.
+
+    ``as_xarray`` is only meaningful for tabular (point) readers backed by
+    ``PandasDriver``, where it selects an xarray return instead of a DataFrame.
+    Gridded readers use ``XarrayDriver``, which has no such option: forwarding it
+    reaches ``xr.open_dataset`` and raises ``OptionUnsupportedError``. Instead of
+    assuming by name, inspect the resolved reader's ``open_dataset`` signature and
+    only inject the option when the reader actually accepts it. When the reader
+    cannot be resolved, preserve the previous behavior (assume it is accepted).
+    """
+    import inspect
+
+    try:
+        from monetio._lazy import import_reader
+        from monetio._manifest import resolve
+        from monetio.readers.base import READER_REGISTRY
+
+        spec = resolve(dataset_type)
+        import_reader(dataset_type)
+        reader_cls = READER_REGISTRY.get(spec.name) or READER_REGISTRY.get(dataset_type)
+    except Exception:
+        logger.debug("Could not resolve reader for '%s'; assuming as_xarray is accepted.", dataset_type)
+        return True
+
+    if reader_cls is None:
+        return True
+
+    try:
+        parameters = inspect.signature(reader_cls.open_dataset).parameters
+    except (TypeError, ValueError):
+        return True
+
+    return "as_xarray" in parameters
+
+
+# Options that only gridded readers (XarrayDriver) understand; tabular readers
+# reject every one of them (see monetio PointReader._reject_virtualizarr).
+_VIRTUALIZARR_OPTIONS = frozenset(
+    {
+        "use_virtualizarr",
+        "virtualizarr_file",
+        "virtualizarr_parser",
+        "virtualizarr_backend",
+        "icechunk_repo",
+        "use_icechunk",
+        "icechunk_url",
+    }
+)
+
+
+def _is_virtualizarr_rejection(error: BaseException) -> bool:
+    """True when a reader refused a VirtualiZarr/Icechunk ingestion option."""
+    if getattr(error, "option", None) in _VIRTUALIZARR_OPTIONS:
+        return True
+    message = str(error).lower()
+    return "virtualizarr" in message or "icechunk" in message
+
+
+def _reader_supports_virtualizarr(dataset_type: str) -> bool:
+    """Return True when the monetio reader for ``dataset_type`` supports VirtualiZarr ingestion.
+
+    VirtualiZarr/Icechunk ingestion writes virtual references for chunked gridded
+    formats (NetCDF/HDF5/GRIB). There is nothing to virtualize in a flat tabular
+    file, so point (tabular) readers backed by ``PandasDriver`` reject every
+    virtualization option. Only gridded readers (``GriddedReader``/``XarrayDriver``)
+    accept them. Inspect the resolved reader's base class rather than assuming by
+    name. When the reader cannot be resolved, preserve the previous behavior
+    (assume ingestion is supported).
+    """
+    try:
+        from monetio._lazy import import_reader
+        from monetio._manifest import resolve
+        from monetio.readers.base import READER_REGISTRY, GriddedReader
+
+        spec = resolve(dataset_type)
+        import_reader(dataset_type)
+        reader_cls = READER_REGISTRY.get(spec.name) or READER_REGISTRY.get(dataset_type)
+    except Exception:
+        logger.debug("Could not resolve reader for '%s'; assuming VirtualiZarr is supported.", dataset_type)
+        return True
+
+    # Only a real reader class reveals the family. Anything else (None, or a
+    # MagicMock from a test that stubs the monetio module) leaves the previous
+    # behavior intact by assuming ingestion is supported.
+    if not isinstance(reader_cls, type):
+        return True
+
+    return issubclass(reader_cls, GriddedReader)
+
+
 def load_data(
     name: str,
     dataset_type: str,
@@ -70,12 +168,12 @@ def load_data(
     import monetio
 
     kwargs = dict(kwargs)
-    # Make xarray the reader contract so the rest of the workflow never has to
-    # branch on a pandas representation.
-    kwargs["as_xarray"] = True
-
-    # Force as_xarray=True for AERONET dataset type
-    if dataset_type == "aeronet":
+    # ``as_xarray`` is a tabular/point-reader option (PandasDriver returns an
+    # xarray object instead of a DataFrame). Gridded readers use XarrayDriver,
+    # which never accepts it and would forward it into xr.open_dataset. Only
+    # request it for readers whose open_dataset actually declares the parameter,
+    # so the rest of the workflow still never has to branch on a pandas view.
+    if _reader_accepts_as_xarray(dataset_type):
         kwargs["as_xarray"] = True
 
     # Extract optional isel / sel dictionary for general dimension subsetting
@@ -504,6 +602,19 @@ def load_data(
 
     # 2. Attempt VirtualiZarr Loading if enabled
     use_virtualizarr = kwargs.get("use_virtualizarr", False) or kwargs.get("use_icechunk", False)
+    if use_virtualizarr and not _reader_supports_virtualizarr(dataset_type):
+        # VirtualiZarr/Icechunk ingestion is gridded-only; a tabular reader (for
+        # example AERONET) rejects the options. Drop them so the dataset loads
+        # directly instead of failing the workflow. A configured save: step can
+        # still persist the loaded data to Zarr/Icechunk afterward.
+        logger.warning(
+            "Dataset '%s' (type '%s') uses a tabular/point reader that does not support "
+            "VirtualiZarr/Icechunk ingestion; ignoring the zarr_store ingestion options and loading directly.",
+            name,
+            dataset_type,
+        )
+        kwargs = _strip_virtualizarr_kwargs(kwargs)
+        use_virtualizarr = False
     if use_virtualizarr:
         backend = "icechunk" if kwargs.get("use_icechunk", False) else kwargs.get("virtualizarr_backend", "kerchunk_json")
         store_path = kwargs.get("store_path", f"./zarr_stores/{name}/")
@@ -530,11 +641,14 @@ def load_data(
             return _apply_subsets(ds)
 
         except TypeError as e:
-            if not _is_unsupported_keyword_type_error(e):
+            # OptionUnsupportedError subclasses TypeError but reports "does not
+            # support option 'X'", so check both the generic keyword rejection and
+            # an explicit VirtualiZarr refusal before falling back.
+            if not (_is_unsupported_keyword_type_error(e) or _is_virtualizarr_rejection(e)):
                 raise
             # Handle cases where reader doesn't support VirtualiZarr kwargs yet
             logger.warning(
-                "VirtualiZarr load failed for '%s' due to unexpected arguments: %s. Retrying with standard monetio.load.",
+                "VirtualiZarr load failed for '%s' (reader does not support the option): %s. Retrying with standard monetio.load.",
                 name,
                 e,
             )
@@ -548,7 +662,20 @@ def load_data(
 
     # 3. Standard Loading Pathway
     try:
-        ds = monetio.load(dataset_type, **kwargs)
+        try:
+            ds = monetio.load(dataset_type, **kwargs)
+        except Exception as e:
+            # Defensive: if the reader still refuses as_xarray (for example a
+            # reader that forwards **kwargs we could not introspect), retry once
+            # without it rather than failing the whole workflow.
+            if not kwargs.get("as_xarray") or not _is_as_xarray_rejection(e):
+                raise
+            logger.warning(
+                "Reader '%s' rejected as_xarray for '%s'; retrying without it.",
+                dataset_type,
+                name,
+            )
+            ds = monetio.load(dataset_type, **{k: v for k, v in kwargs.items() if k != "as_xarray"})
         ds = _prefer_xarray_result(ds)
 
         # Provenance Tracking

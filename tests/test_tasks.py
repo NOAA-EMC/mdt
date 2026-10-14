@@ -23,12 +23,45 @@ def test_load_data_provenance(mocker):
     # Mock monetio.load
     mock_load = mocker.patch("monetio.load", return_value=ds)
 
-    # Load data
-    res = load_data("test_data", "cmaq", {"files": "dummy.nc"})
+    # Load data through a point (tabular) reader, which accepts as_xarray.
+    res = load_data("test_data", "aeronet", {"files": "dummy.nc"})
 
     # Check history
     assert "Loaded dataset 'test_data'" in res.attrs["history"]
     assert mock_load.call_args.kwargs["as_xarray"] is True
+
+
+def test_load_data_gridded_reader_omits_as_xarray(mocker):
+    """Gridded readers use XarrayDriver and must NOT receive the tabular as_xarray option."""
+    ds = xr.Dataset({"val": (("x"), [1, 2, 3])})
+    mock_load = mocker.patch("monetio.load", return_value=ds)
+
+    load_data("gridded_ds", "cmaq", {"files": "dummy.nc"})
+
+    assert "as_xarray" not in mock_load.call_args.kwargs
+
+
+def test_load_data_retries_without_as_xarray_when_reader_rejects(mocker):
+    """A reader that rejects as_xarray is retried once without the option instead of failing."""
+    from monetio.readers.errors import OptionUnsupportedError
+
+    ds = xr.Dataset({"val": (("x"), [1, 2, 3])})
+
+    def fake_load(source, **kwargs):
+        if kwargs.get("as_xarray"):
+            raise OptionUnsupportedError("as_xarray", source)
+        return ds
+
+    mock_load = mocker.patch("monetio.load", side_effect=fake_load)
+
+    # "example" is not a manifest source, so the gate assumes as_xarray is accepted
+    # and injects it; the reader then rejects it and load_data retries without it.
+    res = load_data("retry_ds", "example", {"files": "dummy.nc"})
+
+    assert "Loaded dataset 'retry_ds'" in res.attrs["history"]
+    assert mock_load.call_count == 2
+    assert mock_load.call_args_list[0].kwargs.get("as_xarray") is True
+    assert "as_xarray" not in mock_load.call_args_list[1].kwargs
 
 
 def test_load_data_rejects_tabular_reader_output(mocker):
@@ -58,6 +91,46 @@ def test_load_data_icap_date_alias_to_dates(mocker):
     assert "dates" in call_kwargs
     assert call_kwargs["dates"] == "2023-01-04"
     assert "date" not in call_kwargs
+
+
+def test_load_data_point_reader_ignores_virtualizarr_ingestion(mocker):
+    """A tabular reader with a configured zarr_store must not be routed through VirtualiZarr ingestion."""
+    from monetio.readers.errors import OptionUnsupportedError
+
+    ds = xr.Dataset({"val": (("x"), [1, 2, 3])})
+
+    def fake_load(source, **kwargs):
+        # Mirror monetio's real behavior: a point reader rejects virtualization options.
+        for option in ("use_virtualizarr", "use_icechunk", "icechunk_url"):
+            if kwargs.get(option):
+                raise OptionUnsupportedError(option, source)
+        return ds
+
+    mock_load = mocker.patch("monetio.load", side_effect=fake_load)
+
+    # aeronet is a point reader, so the gate strips the ingestion options before
+    # calling the reader; the load succeeds via the standard pathway.
+    res = load_data(
+        "aeronet_obs",
+        "aeronet",
+        {"dates": "2023-01-01", "use_icechunk": True, "icechunk_url": "./zarr_stores/aeronet_icechunk"},
+    )
+
+    assert "Loaded dataset 'aeronet_obs'" in res.attrs["history"]
+    sent = mock_load.call_args.kwargs
+    assert "use_icechunk" not in sent
+    assert "icechunk_url" not in sent
+
+
+def test_load_data_gridded_reader_keeps_virtualizarr_ingestion(mocker):
+    """Gridded readers still receive VirtualiZarr ingestion options unchanged."""
+    ds = xr.Dataset({"val": (("x"), [1, 2, 3])})
+    mock_load = mocker.patch("monetio.load", return_value=ds)
+
+    load_data("gefs_model", "gefs", {"files": "dummy.grib2", "use_icechunk": True, "icechunk_url": "./ice"})
+
+    sent = mock_load.call_args.kwargs
+    assert sent.get("use_icechunk") is True
 
 
 def test_pair_data_double_check(mocker):
