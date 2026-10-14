@@ -66,6 +66,20 @@ def compute_statistics(
     input_data = to_xarray(input_data)
     regions = kwargs.pop("regions", None)
 
+    model_dim = kwargs.pop("model_dim", input_data.attrs.get("mdt_model_dim", "model") if isinstance(input_data, xr.Dataset) else "model")
+    if isinstance(input_data, xr.Dataset) and model_dim in input_data.dims:
+        results = {}
+        for model in input_data[model_dim].values.tolist():
+            model_kwargs = dict(kwargs)
+            if model_kwargs.get("savename"):
+                path = Path(model_kwargs["savename"])
+                model_kwargs["savename"] = str(path.with_name(f"{path.stem}_{model}{path.suffix}"))
+            model_data = input_data.sel({model_dim: model})
+            results[str(model)] = compute_statistics(
+                name=f"{name}_{model}", metrics=metrics, input_data=model_data, kwargs={**model_kwargs, **({"regions": regions} if regions else {})}
+            )
+        return results
+
     if regions:
         savename_template = kwargs.get("savename", "")
         if "{region}" not in savename_template:

@@ -160,28 +160,31 @@ class DAGBuilder:
 
         for name, details in pairing_cfg.items():
             node_id = f"pair_{name}"
-            source = details.get("source")
+            sources = details.get("sources", [details.get("source")])
             target = details.get("target")
 
-            if not source or not target:
-                if not source:
-                    self._record_error(f"pairing.{name}.source", "required dataset reference is missing")
+            if not sources or not sources[0] or not target:
+                if not sources or not sources[0]:
+                    self._record_error(f"pairing.{name}.sources", "at least one dataset reference is required")
                 if not target:
                     self._record_error(f"pairing.{name}.target", "required dataset reference is missing")
                 continue
 
-            source_node = self._find_node(source)
             target_node = self._find_node(target)
-
-            if not source_node:
-                self._record_error(f"pairing.{name}.source", f"reference '{source}' does not resolve to a task")
+            source_nodes = []
+            for index, source in enumerate(sources):
+                source_node = self._find_node(source)
+                if source_node:
+                    source_nodes.append(source_node)
+                else:
+                    self._record_error(f"pairing.{name}.sources[{index}]", f"reference '{source}' does not resolve to a task")
             if not target_node:
                 self._record_error(f"pairing.{name}.target", f"reference '{target}' does not resolve to a task")
-            if not source_node or not target_node:
+            if not source_nodes or not target_node:
                 continue
 
             target_cluster = details.get("cluster", default_cluster)
-            logger.debug(f"Adding pairing node: {node_id} (source={source_node}, target={target_node}, cluster={target_cluster})")
+            logger.debug(f"Adding pairing node: {node_id} (sources={source_nodes}, target={target_node}, cluster={target_cluster})")
             mask = details.get("mask")
             node_attrs = {
                 "task_type": "pair_data",
@@ -189,15 +192,16 @@ class DAGBuilder:
                 "method": details.get("method", "interpolate"),
                 "cluster": target_cluster,
                 "kwargs": dict(details.get("kwargs") or {}),
-                "source_name": source,
+                "source_names": list(sources),
                 "target_name": target,
+                "model_dim": details.get("model_dim", "model"),
             }
             if mask:
                 node_attrs["mask"] = mask
             self.graph.add_node(node_id, **node_attrs)
 
-            logger.debug(f"Adding edge: {source_node} -> {node_id}")
-            self.graph.add_edge(source_node, node_id)
+            for source_node in source_nodes:
+                self.graph.add_edge(source_node, node_id)
             logger.debug(f"Adding edge: {target_node} -> {node_id}")
             self.graph.add_edge(target_node, node_id)
 

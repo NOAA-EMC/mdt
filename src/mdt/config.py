@@ -102,6 +102,16 @@ class ConfigParser:
                     raise ValueError(f"Configuration validation failed: Data source '{name}' is missing the required 'type' field.")
                 if "kwargs" in details and details["kwargs"] is not None and not isinstance(details["kwargs"], dict):
                     raise ValueError(f"Configuration validation failed: data.{name}.kwargs must be a mapping.")
+                time_axis = (details.get("kwargs") or {}).get("time_axis")
+                if time_axis is not None:
+                    if not isinstance(time_axis, dict):
+                        raise ValueError(f"Configuration validation failed: data.{name}.kwargs.time_axis must be a mapping.")
+                    for role, candidates in time_axis.items():
+                        if role not in {"valid_time", "forecast_reference_time", "lead_time"}:
+                            raise ValueError(f"Configuration validation failed: data.{name}.kwargs.time_axis has unknown role '{role}'.")
+                        values = [candidates] if isinstance(candidates, str) else candidates
+                        if not isinstance(values, list) or not values or not all(isinstance(value, str) and value.strip() for value in values):
+                            raise ValueError(f"Configuration validation failed: data.{name}.kwargs.time_axis.{role} must be a name or non-empty list of names.")
 
                 zarr_store = details.get("zarr_store")
                 if zarr_store is not None:
@@ -133,8 +143,15 @@ class ConfigParser:
             for name, details in self.config["pairing"].items():
                 if not isinstance(details, dict):
                     raise ValueError(f"Configuration validation failed: Pairing '{name}' must be a dictionary, got {type(details).__name__}.")
-                if "source" not in details or "target" not in details:
-                    raise ValueError(f"Configuration validation failed: Pairing '{name}' must specify both 'source' and 'target' keys.")
+                sources = details.get("sources", details.get("source"))
+                if sources is None or "target" not in details:
+                    raise ValueError(
+                        f"Configuration validation failed: Pairing '{name}' must specify 'source' (or non-empty 'sources') and 'target'."
+                    )
+                if "sources" in details and (
+                    not isinstance(sources, list) or not sources or not all(isinstance(s, str) and s.strip() for s in sources)
+                ):
+                    raise ValueError(f"Configuration validation failed: pairing.{name}.sources must be a non-empty list of dataset names.")
                 if "kwargs" in details and details["kwargs"] is not None and not isinstance(details["kwargs"], dict):
                     raise ValueError(f"Configuration validation failed: pairing.{name}.kwargs must be a mapping.")
 

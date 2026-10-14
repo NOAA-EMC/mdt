@@ -69,21 +69,60 @@ data:
       store_path: "s3://my-bucket/aeronet-zarr"
 ```
 
+### Local GRIB2 files
+
+For local GEFS, GFS, or `ncep_grib` inputs, `files` may be a file pattern, a
+list of patterns, or a directory containing GRIB files. MDT expands local
+patterns in sorted order before loading and reports a clear error when nothing
+matches. Remote URLs are passed through to the reader unchanged.
+
+Time normalization is generic. MDT leaves datasets with an ordinary `time`
+coordinate unchanged. For forecast datasets, declare coordinate roles under
+`kwargs.time_axis`, or use CF `standard_name` metadata. MDT uses valid time for
+the pairing `time` axis and retains forecast reference and lead coordinates.
+The coordinate values come from the loaded data; MDT does not infer them from
+requested date or lead lists.
+
+```yaml
+data:
+  local_gefs:
+    type: "gefs"
+    kwargs:
+      files: "/data/gefs/2025/08/**/*.grib2"
+      filters:
+        shortName: "totAOD550"
+      time_axis:
+        valid_time: [valid_time, time]
+        forecast_reference_time: [forecast_reference_time, reference_time, time]
+        lead_time: [lead_time, forecast_period, step]
+```
+
+Use `sel` to choose cycles or lead values before normalization, for example
+`sel: {lead_time: 6}`.
+
 ---
 
 ## 2. `pairing` Section
 
-Pairing tasks align two datasets together.
+Pairing tasks align model datasets to a target dataset. Use `source` for one model, or `sources` for several models that share the same target.
 
 *   **`source`**: The name of the source dataset (usually a model).
+*   **`sources`**: A list of source dataset names (alternative to `source`). The output uses a model dimension, so same-named variables from different models remain distinct.
 *   **`target`**: The name of the target dataset (usually observations).
 *   **`method`**: The pairing algorithm (`interpolate` or `regrid`).
 *   **`kwargs`**: Additional arguments for the pairing function.
+*   **`model_dim`**: The model coordinate name for multi-source pairing (defaults to `model`).
 
 For model-to-model comparison using `regrid`, you can use `merge_target: true` to include the target model in the output.
 
 ```yaml
 pairing:
+  gefs_gfs_aeronet:
+    sources: [gefs_model, gfs_model]
+    target: aeronet_obs
+    method: bilinear
+    model_dim: model
+
   # Model vs Obs (Interpolation)
   cmaq_airnow:
     source: "cmaq_output"

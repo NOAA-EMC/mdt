@@ -75,6 +75,13 @@ def _drop_duplicate_time_entries(
             time_index = data.indexes["time"]
             dup_count = int(time_index.duplicated().sum())
             if dup_count > 0:
+                if isinstance(data, xr.Dataset) and {"forecast_reference_time", "lead_time"}.issubset(data.coords):
+                    logger.info(
+                        "Dataset '%s' has %d repeated valid times from distinct forecast cycles/leads; preserving all forecast records.",
+                        name,
+                        dup_count,
+                    )
+                    return data
                 logger.warning(
                     "Dataset '%s' %s contains %d duplicate time values; keeping first occurrence.",
                     name,
@@ -91,7 +98,7 @@ def _drop_duplicate_time_entries(
 def pair_data(
     name: str,
     method: str,
-    source_data: Union[xr.Dataset, xr.DataArray],
+    source_data: Union[xr.Dataset, xr.DataArray, Dict[str, Union[xr.Dataset, xr.DataArray]]],
     target_data: Union[xr.Dataset, xr.DataArray],
     kwargs: Dict[str, Any],
     mask: Optional[str] = None,
@@ -137,6 +144,24 @@ def pair_data(
     ...     "my_pairing", "bilinear", model_ds, obs_df, {"interp_time": True}, mask="land"
     ... )
     """
+    if isinstance(source_data, dict):
+        if not source_data:
+            raise ValueError("Multi-model pairing requires at least one source dataset.")
+        dim = kwargs.pop("model_dim", "model")
+        paired = {model: pair_data(name, method, data, target_data, dict(kwargs), mask=mask) for model, data in source_data.items()}
+        combined = combine_paired_data(paired, dim=dim)
+        # Observation fields are shared across models. Collapse fields whose
+        # values are identical for every model; model fields remain model-indexed.
+        if isinstance(combined, xr.Dataset):
+            combined.attrs["mdt_model_dim"] = dim
+            for var in list(combined.data_vars):
+                if dim not in combined[var].dims:
+                    continue
+                first = combined[var].isel({dim: 0}, drop=True)
+                if all(combined[var].isel({dim: i}, drop=True).identical(first) for i in range(1, combined.sizes[dim])):
+                    combined[var] = first
+        return combined
+
     logger.info("Pairing data '%s' using method '%s'", name, method)
 
     source_data = to_xarray(source_data)

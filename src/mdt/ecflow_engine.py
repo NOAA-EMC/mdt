@@ -56,8 +56,13 @@ _DISPATCH_BLOCKS: dict[str, str] = {
     ),
     "pair_data": (
         "    from mdt.tasks.pairing import pair_data\n"
+        "    source_inputs = input_node_ids['source']\n"
+        "    if isinstance(source_inputs, dict):\n"
+        "        source_inputs = {name: load_artifact(data_dir, node_id) for name, node_id in source_inputs.items()}\n"
+        "        if len(source_inputs) == 1:\n"
+        "            source_inputs = next(iter(source_inputs.values()))\n"
         "    result = pair_data(name=task_name, method=method,\n"
-        "                       source_data=inputs['source'], target_data=inputs['target'], kwargs=kwargs)"
+        "                       source_data=source_inputs, target_data=inputs['target'], kwargs=kwargs)"
     ),
     "combine_paired_data": (
         "    from mdt.tasks.pairing import combine_paired_data\n"
@@ -138,7 +143,7 @@ def _build_wrapper_script(node_id: str, python_executable: str) -> str:  # noqa:
         "    data_dir = decode('%DATA_DIR_B64%')",
         "    input_node_ids = json.loads(decode('%INPUT_NODE_IDS_B64%'))",
         "    from mdt.ecflow_io import load_artifact, save_artifact",
-        "    inputs = {key: load_artifact(data_dir, upstream_id) for key, upstream_id in input_node_ids.items() if key != 'pairs'}",
+        "    inputs = {key: load_artifact(data_dir, upstream_id) for key, upstream_id in input_node_ids.items() if key not in ('pairs', 'source')}",
         "",
         "    # --- dispatch to the correct MDT task function ---",
     ]
@@ -425,12 +430,16 @@ class EcFlowEngine(Engine):
         task_type = data["task_type"]
         if task_type == "pair_data":
             result = {}
-            for role, name_key in (("source", "source_name"), ("target", "target_name")):
-                logical_name = data.get(name_key)
+            for role, logical_name in [("target", data.get("target_name"))]:
                 matches = [parent for parent in predecessors if self.dag.nodes[parent].get("name") == logical_name]
                 if len(matches) != 1:
                     raise ValueError(f"ecFlow task {node_id!r} cannot resolve its {role} input {logical_name!r}")
                 result[role] = matches[0]
+            sources = {
+                name: next(parent for parent in predecessors if self.dag.nodes[parent].get("name") == name)
+                for name in data.get("source_names", [data.get("source_name")])
+            }
+            result["source"] = sources if len(sources) > 1 else next(iter(sources.values()))
             return result
         if task_type == "combine_paired_data":
             pairs = {}

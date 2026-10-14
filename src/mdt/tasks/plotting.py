@@ -1,6 +1,7 @@
 import logging
 import re
 from functools import lru_cache
+from pathlib import Path
 from typing import Any, Dict, Union, cast
 
 import numpy as np
@@ -263,6 +264,18 @@ def generate_plot(
         return value
 
     input_data = normalize(input_data)
+    model_dim = kwargs.pop("model_dim", input_data.attrs.get("mdt_model_dim", "model") if isinstance(input_data, xr.Dataset) else "model")
+    if isinstance(input_data, xr.Dataset) and model_dim in input_data.dims:
+        results = {}
+        for model in input_data[model_dim].values.tolist():
+            model_kwargs = dict(kwargs)
+            if model_kwargs.get("savename"):
+                path = Path(model_kwargs["savename"])
+                model_kwargs["savename"] = str(path.with_name(f"{path.stem}_{_sanitize_region_name(str(model))}{path.suffix}"))
+            results[str(model)] = generate_plot(
+                name=f"{name}_{model}", plot_type=plot_type, input_data=input_data.sel({model_dim: model}), kwargs=model_kwargs, track=track
+            )
+        return results
     regions = kwargs.pop("regions", None)
 
     if regions:

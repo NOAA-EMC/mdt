@@ -388,20 +388,25 @@ class PrefectEngine(Engine):
 
                     elif task_type == "pair_data":
                         # Resolve source and target node IDs from DAG metadata
-                        source_name = node_data.get("source_name")
+                        source_names = node_data.get("source_names", [node_data.get("source_name")])
                         target_name = node_data.get("target_name")
 
                         # Resolve node IDs from the actual predecessors in the DAG
                         # We look for nodes where the 'name' attribute matches the requested source/target names
-                        source_node_id = next((p for p in predecessors if dag.nodes[p].get("name") == source_name), None)
+                        source_node_ids = {
+                            source_name: next((p for p in predecessors if dag.nodes[p].get("name") == source_name), None)
+                            for source_name in source_names
+                        }
                         target_node_id = next((p for p in predecessors if dag.nodes[p].get("name") == target_name), None)
 
-                        if not source_node_id or not target_node_id:
+                        if any(value is None for value in source_node_ids.values()) or not target_node_id:
                             logger.error(
-                                f"Failed to resolve predecessors for pairing '{node_id}'. Source: {source_node_id}, Target: {target_node_id}"
+                                f"Failed to resolve predecessors for pairing '{node_id}'. Sources: {source_node_ids}, Target: {target_node_id}"
                             )
 
-                        source_output = task_outputs.get(source_node_id) if source_node_id else None
+                        source_output = {name: task_outputs.get(node_id) for name, node_id in source_node_ids.items()}
+                        if len(source_output) == 1:
+                            source_output = next(iter(source_output.values()))
                         target_output = task_outputs.get(target_node_id) if target_node_id else None
 
                         if serialize_pair_tasks:
@@ -416,7 +421,7 @@ class PrefectEngine(Engine):
                                 method=node_data["method"],
                                 source_data=_resolve_output(source_output),
                                 target_data=_resolve_output(target_output),
-                                kwargs=node_data["kwargs"],
+                                kwargs={**node_data["kwargs"], "model_dim": node_data.get("model_dim", "model")},
                             )
                             task_outputs[node_id] = pair_result
                             last_pair_future = pair_result
@@ -426,7 +431,7 @@ class PrefectEngine(Engine):
                                 method=node_data["method"],
                                 source_data=source_output,
                                 target_data=target_output,
-                                kwargs=node_data["kwargs"],
+                                kwargs={**node_data["kwargs"], "model_dim": node_data.get("model_dim", "model")},
                             )
                             task_outputs[node_id] = future
 

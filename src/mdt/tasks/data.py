@@ -1,3 +1,4 @@
+import glob
 import logging
 import os
 import threading
@@ -33,6 +34,45 @@ def _icechunk_retry_environment(max_attempts: int) -> Iterator[None]:
 def _is_unsupported_keyword_type_error(error: TypeError) -> bool:
     message = str(error).lower()
     return "unexpected keyword argument" in message or "takes no keyword arguments" in message
+
+
+def _expand_local_grib_files(kwargs: Dict[str, Any], dataset_type: str, name: str) -> Dict[str, Any]:
+    """Resolve local GRIB file patterns before handing them to MonetIO.
+
+    MonetIO readers often use globbing internally, but expansion here gives
+    deterministic input order and an early, useful error for typos or empty
+    date ranges. Remote paths and non-GRIB readers are left untouched.
+    """
+    if dataset_type not in {"gefs", "gfs", "ncep_grib"} or "files" not in kwargs:
+        return kwargs
+
+    raw_files = kwargs["files"]
+    patterns = [raw_files] if isinstance(raw_files, (str, os.PathLike)) else list(raw_files) if isinstance(raw_files, (list, tuple)) else []
+    if not patterns or any(str(item).startswith(("s3://", "http://", "https://")) for item in patterns):
+        return kwargs
+
+    expanded: list[str] = []
+    for item in patterns:
+        pattern = os.fspath(item)
+        matches = glob.glob(pattern, recursive=True)
+        if len(matches) == 1 and Path(matches[0]).is_dir():
+            matches = [
+                str(path) for path in Path(matches[0]).rglob("*") if path.is_file() and path.suffix.lower() in {".grb", ".grib", ".grb2", ".grib2"}
+            ]
+        if not matches and Path(pattern).is_file():
+            matches = [pattern]
+        expanded.extend(path for path in matches if Path(path).is_file())
+
+    files = sorted(dict.fromkeys(os.path.abspath(path) for path in expanded))
+    if not files:
+        raise FileNotFoundError(
+            f"No local GRIB2 files found for dataset '{name}' using files={raw_files!r}. Check the path pattern and date range."
+        )
+
+    result = dict(kwargs)
+    result["files"] = files
+    logger.info("Resolved %d local GRIB input file(s) for '%s'.", len(files), name)
+    return result
 
 
 def _unsupported_option_name(error: BaseException) -> str | None:
@@ -150,53 +190,134 @@ def _reader_supports_virtualizarr(dataset_type: str) -> bool:
     return issubclass(reader_cls, GriddedReader)
 
 
-# Fields a GRIB2 archive uses to name the cycle each record belongs to. A
-# 1-D variable named ``time`` is always promoted to a coordinate by xarray, so
-# the unindexed-dimension case can only carry its labels under another name.
-_TIME_VARIABLE_CANDIDATES = ("valid_time", "reference_time")
+def _time_role(ds: xr.Dataset, configured: Any, standard_name: str, exclude: set[str] | None = None) -> str | None:
+    """Resolve one time coordinate from explicit policy or CF metadata."""
+    candidates = [configured] if isinstance(configured, str) else list(configured or [])
+    candidates.extend(
+        name for name, var in ds.variables.items() if var.attrs.get("standard_name") == standard_name
+    )
+    incompatible = {
+        "time": {"forecast_reference_time", "forecast_period"},
+        "forecast_reference_time": {"time", "forecast_period"},
+        "forecast_period": {"time", "forecast_reference_time"},
+    }.get(standard_name, set())
+    exclude = exclude or set()
+    return next(
+        (
+            name for name in candidates
+            if (name in ds.variables or name in ds.dims)
+            and name not in exclude
+            and ds.variables.get(name, xr.DataArray()).attrs.get("standard_name") not in incompatible
+        ),
+        None,
+    )
 
 
-def _promote_time_coordinate(loaded_obj: xr.Dataset, name: str) -> xr.Dataset:
-    """Use an in-band time variable as the ``time`` coordinate when one is missing.
+def _time_delta(step: xr.DataArray) -> xr.DataArray:
+    """Convert numeric or timedelta forecast periods to timedeltas."""
+    if np.issubdtype(step.dtype, np.timedelta64):
+        return step
+    if np.issubdtype(step.dtype, np.number):
+        units = str(step.attrs.get("units", "h")).lower()
+        aliases = {"hour": "h", "hours": "h", "hr": "h", "hrs": "h", "minute": "m", "minutes": "m", "second": "s", "seconds": "s"}
+        values = pd.to_timedelta(step.values, unit=aliases.get(units, units))
+        return xr.DataArray(values, dims=step.dims, coords=step.coords)
+    values = pd.to_timedelta(step.values)
+    return xr.DataArray(values, dims=step.dims, coords=step.coords)
 
-    GRIB2 messages carry their own ``time``/``valid_time`` fields, and when
-    several files are concatenated xarray produces a ``time`` *dimension* whose
-    coordinate is never set -- the cycle times stay as ordinary data variables.
-    Downstream pairing then fails to align the model against observations,
-    because alignment needs a real ``time`` index to match labels instead of
-    sizes. Prefer the times the archive already provides over asking the user to
-    rebuild them from ``dates``/``lead_time``.
+
+def _promote_time_coordinate(loaded_obj: xr.Dataset, name: str, policy: Dict[str, Any] | None = None) -> xr.Dataset:
+    """Normalize declared/CF-described forecast coordinates for pairing.
+
+    Datasets without a declared or CF-identifiable forecast time relationship
+    are returned unchanged. ``policy`` may map ``valid_time``,
+    ``forecast_reference_time`` and ``lead_time`` to variable names or ordered
+    candidate-name lists. No reader-specific variable names are assumed.
     """
-    if "time" not in loaded_obj.sizes or loaded_obj.sizes["time"] <= 1:
+    if not isinstance(loaded_obj, xr.Dataset):
         return loaded_obj
-    if "time" in loaded_obj.coords and loaded_obj.coords["time"].ndim > 0:
-        return loaded_obj
+    ds = loaded_obj
+    policy = policy or {}
+    valid_name = _time_role(ds, policy.get("valid_time"), "time")
+    reference_name = _time_role(ds, policy.get("forecast_reference_time"), "forecast_reference_time", {valid_name} if valid_name else None)
+    lead_name = _time_role(ds, policy.get("lead_time"), "forecast_period", {n for n in (valid_name, reference_name) if n})
 
-    for candidate in _TIME_VARIABLE_CANDIDATES:
-        var = loaded_obj.variables.get(candidate)
-        if var is None or var.dims != ("time",):
-            continue
-        values = np.asarray(var.values)
-        # Only datetime or text fields actually name a cycle; a numeric field
-        # would be silently misread as an epoch offset.
-        if values.dtype.kind not in ("M", "U", "O"):
-            continue
-        try:
-            times = pd.to_datetime(values)
-        except (ValueError, TypeError):
-            continue
-        promoted = loaded_obj.assign_coords(time=("time", times))
-        if candidate != "time":
-            promoted = promoted.drop_vars(candidate, errors="ignore")
-        logger.info(
-            "Promoted in-band '%s' variable to the 'time' coordinate for '%s' (%d times).",
-            candidate,
-            name,
-            len(times),
-        )
-        return promoted
+    # Only infer a valid-time alias automatically when both forecast components
+    # are identified. A generic coordinate named `time` remains untouched.
+    if valid_name is None and reference_name and lead_name:
+        valid_name = next((n for n, v in ds.variables.items() if v.attrs.get("standard_name") == "time" and n != reference_name), None)
+    if valid_name is None and not (reference_name and lead_name):
+        return ds
+    if reference_name is None and lead_name is None and (not policy or valid_name == "time"):
+        return ds
 
-    return loaded_obj
+    for coord in (valid_name, reference_name, lead_name):
+        if coord and coord in ds.data_vars:
+            ds = ds.set_coords(coord)
+
+    # MonetIO and other readers sometimes expose valid time under `time`.
+    # An explicit role mapping resolves that without imposing a reader-specific rule.
+    rename = {}
+    if reference_name and reference_name != valid_name and reference_name != "forecast_reference_time":
+        rename[reference_name] = "forecast_reference_time"
+    if lead_name and lead_name != valid_name and lead_name != "lead_time":
+        rename[lead_name] = "lead_time"
+    if rename:
+        ds = ds.rename(rename)
+
+    if "forecast_reference_time" not in ds and "reference_time" in ds:
+        ds = ds.assign_coords(forecast_reference_time=ds["reference_time"])
+
+    if valid_name and valid_name in ds:
+        valid = ds[valid_name]
+    elif "valid_time" in ds:
+        valid = ds["valid_time"]
+        valid_name = "valid_time"
+    elif "forecast_reference_time" in ds and "lead_time" in ds:
+        valid = ds["forecast_reference_time"] + _time_delta(ds["lead_time"])
+        ds = ds.assign_coords(valid_time=valid)
+        valid_name = "valid_time"
+    else:
+        return ds
+
+    # Numeric fields are offsets, not absolute datetimes. Do not turn them into
+    # epoch timestamps; derive valid time only when both forecast components exist.
+    if np.issubdtype(valid.dtype, np.number):
+        if "forecast_reference_time" not in ds or "lead_time" not in ds:
+            logger.warning("Dataset '%s' has numeric time values without a reference/lead pair; leaving its time axes unchanged.", name)
+            return ds
+        valid = ds["forecast_reference_time"] + _time_delta(ds["lead_time"])
+
+    if "forecast_reference_time" not in ds and "lead_time" in ds:
+        ds = ds.assign_coords(forecast_reference_time=valid - _time_delta(ds["lead_time"]))
+    if valid_name != "valid_time" and valid_name in ds:
+        ds = ds.assign_coords(valid_time=ds[valid_name])
+        valid = ds["valid_time"]
+    elif "valid_time" in ds:
+        valid = ds["valid_time"]
+
+    # Free the canonical sample-axis name when a reader uses `time` for valid
+    # time on a differently named lead dimension (for example, `step`).
+    if valid_name == "time" and "time" in ds.coords and ds["time"].dims != ("time",):
+        ds = ds.drop_vars("time")
+        valid = ds["valid_time"]
+
+    if valid.ndim == 0:
+        value = valid.values
+        value = pd.to_datetime(value) if np.asarray(value).dtype.kind in ("U", "S") else value
+        return ds.expand_dims(time=[value])
+
+    forecast_dims = list(valid.dims)
+    if forecast_dims != ["time"]:
+        ds = ds.stack(time=forecast_dims, create_index=False)
+        values = np.asarray(valid.values).reshape(-1)
+        values = pd.to_datetime(values) if values.dtype.kind in ("U", "S") else values
+        ds = ds.assign_coords(time=("time", values))
+    else:
+        ds = ds.assign_coords(time=valid)
+    ds = ds.assign_coords(valid_time=ds["time"])
+    logger.info("Normalized declared forecast time coordinates for '%s'.", name)
+    return ds
 
 
 def load_data(
@@ -234,6 +355,10 @@ def load_data(
     import monetio
 
     kwargs = dict(kwargs)
+    kwargs = _expand_local_grib_files(kwargs, dataset_type, name)
+    time_axis_policy = kwargs.pop("time_axis", None)
+    if time_axis_policy is not None and not isinstance(time_axis_policy, dict):
+        raise ValueError(f"Dataset '{name}': time_axis must be a mapping of forecast coordinate roles to variable names.")
     # ``as_xarray`` is a tabular/point-reader option (PandasDriver returns an
     # xarray object instead of a DataFrame). Gridded readers use XarrayDriver,
     # which never accepts it and would forward it into xr.open_dataset. Only
@@ -260,11 +385,6 @@ def load_data(
         if not isinstance(loaded_obj, xr.Dataset):
             return loaded_obj
 
-        # Standardize time coordinate name: map "valid_time" to "time" if "time" is not present
-        if "valid_time" in loaded_obj.coords or "valid_time" in loaded_obj.dims:
-            if "time" not in loaded_obj.coords and "time" not in loaded_obj.dims:
-                loaded_obj = loaded_obj.rename({"valid_time": "time"})
-                logger.info("Automatically mapped coordinate/dimension 'valid_time' to 'time' for '%s'.", name)
         # Apply generic variable/coordinate renaming
         if rename_dict is not None and isinstance(rename_dict, dict):
             # Support both list and dataset variables/coordinates
@@ -287,47 +407,6 @@ def load_data(
                     loaded_obj[var] = loaded_obj[var] + shift
                     logger.info("Applied generic offset to variable '%s' of '%s' by shift %s", var, name, shift)
 
-        # Concatenated GRIB2 files keep their cycle times as data variables; use
-        # those directly rather than rebuilding the axis from the request options.
-        loaded_obj = _promote_time_coordinate(loaded_obj, name)
-
-        # For GFS and GEFS datasets, GRIB2 loading of multiple lead times creates a 'time' dimension of size > 1,
-        # but the time index/coordinate is missing or scalar. Reconstruct it before coordinate-based sel.
-        if "time" in loaded_obj.sizes and loaded_obj.sizes["time"] > 1:
-            if "time" not in loaded_obj.coords or loaded_obj.coords["time"].ndim == 0:
-                try:
-                    dates_val = kwargs.get("dates")
-                    lead_time_val = kwargs.get("lead_time", [0])
-
-                    if dates_val is None:
-                        raise ValueError("'dates' is required to reconstruct a missing time coordinate")
-
-                    # Normalize dates to a list of strings/timestamps
-                    if isinstance(dates_val, str):
-                        dates_list = [dates_val]
-                    elif isinstance(dates_val, (list, tuple)):
-                        dates_list = list(dates_val)
-                    else:
-                        dates_list = [pd.to_datetime(dates_val).strftime("%Y-%m-%d %H:%M:%S")]
-
-                    # Normalize lead_time to a list of integers
-                    if isinstance(lead_time_val, (int, float)):
-                        lead_times = [int(lead_time_val)]
-                    else:
-                        lead_times = [int(lt) for lt in lead_time_val]
-
-                    valid_times = []
-                    for d in dates_list:
-                        base_dt = pd.to_datetime(d)
-                        for lt in lead_times:
-                            valid_times.append(base_dt + pd.to_timedelta(lt, unit="h"))
-
-                    if len(valid_times) == loaded_obj.sizes["time"]:
-                        loaded_obj = loaded_obj.assign_coords({"time": ("time", valid_times)})
-                        logger.info("Dynamically assigned matching 'time' coordinate index for '%s' (%d times).", name, len(valid_times))
-                except Exception as e:
-                    logger.warning("Failed to dynamically reconstruct time index for '%s': %s", name, e)
-
         if isel_dict is not None:
             # Safely filter dictionary keys to those actually present in the dataset dimensions
             valid_isel = {k: v for k, v in isel_dict.items() if k in loaded_obj.dims}
@@ -341,6 +420,10 @@ def load_data(
             if valid_sel:
                 loaded_obj = loaded_obj.sel(valid_sel)
                 logger.info("Applied sel subsetting on '%s': %s", name, valid_sel)
+
+        # Apply cycle/lead selection in the source layout, then normalize the
+        # remaining records to valid-time samples for MDT pairing.
+        loaded_obj = _promote_time_coordinate(loaded_obj, name, time_axis_policy)
 
         # Dynamically calculate wind speed if U and V wind components are present
         import numpy as np
