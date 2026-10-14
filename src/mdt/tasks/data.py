@@ -1,4 +1,3 @@
-import glob
 import logging
 import os
 import threading
@@ -53,17 +52,20 @@ def _expand_local_grib_files(kwargs: Dict[str, Any], dataset_type: str, name: st
 
     expanded: list[str] = []
     for item in patterns:
-        pattern = os.fspath(item)
-        matches = glob.glob(pattern, recursive=True)
+        path_pattern = Path(item).expanduser()
+        root = Path(path_pattern.anchor) if path_pattern.is_absolute() else Path()
+        relative_pattern = path_pattern.relative_to(path_pattern.anchor) if path_pattern.is_absolute() else path_pattern
+        matches = [str(path) for path in root.glob(str(relative_pattern))]
+        literal_path = str(path_pattern)
         if len(matches) == 1 and Path(matches[0]).is_dir():
             matches = [
                 str(path) for path in Path(matches[0]).rglob("*") if path.is_file() and path.suffix.lower() in {".grb", ".grib", ".grb2", ".grib2"}
             ]
-        if not matches and Path(pattern).is_file():
-            matches = [pattern]
+        if not matches and path_pattern.is_file():
+            matches = [literal_path]
         expanded.extend(path for path in matches if Path(path).is_file())
 
-    files = sorted(dict.fromkeys(os.path.abspath(path) for path in expanded))
+    files = sorted(dict.fromkeys(str(Path(path).resolve()) for path in expanded))
     if not files:
         raise FileNotFoundError(
             f"No local GRIB2 files found for dataset '{name}' using files={raw_files!r}. Check the path pattern and date range."
@@ -193,9 +195,7 @@ def _reader_supports_virtualizarr(dataset_type: str) -> bool:
 def _time_role(ds: xr.Dataset, configured: Any, standard_name: str, exclude: set[str] | None = None) -> str | None:
     """Resolve one time coordinate from explicit policy or CF metadata."""
     candidates = [configured] if isinstance(configured, str) else list(configured or [])
-    candidates.extend(
-        name for name, var in ds.variables.items() if var.attrs.get("standard_name") == standard_name
-    )
+    candidates.extend(name for name, var in ds.variables.items() if var.attrs.get("standard_name") == standard_name)
     incompatible = {
         "time": {"forecast_reference_time", "forecast_period"},
         "forecast_reference_time": {"time", "forecast_period"},
@@ -204,7 +204,8 @@ def _time_role(ds: xr.Dataset, configured: Any, standard_name: str, exclude: set
     exclude = exclude or set()
     return next(
         (
-            name for name in candidates
+            name
+            for name in candidates
             if (name in ds.variables or name in ds.dims)
             and name not in exclude
             and ds.variables.get(name, xr.DataArray()).attrs.get("standard_name") not in incompatible
@@ -220,7 +221,8 @@ def _time_delta(step: xr.DataArray) -> xr.DataArray:
     if np.issubdtype(step.dtype, np.number):
         units = str(step.attrs.get("units", "h")).lower()
         aliases = {"hour": "h", "hours": "h", "hr": "h", "hrs": "h", "minute": "m", "minutes": "m", "second": "s", "seconds": "s"}
-        values = pd.to_timedelta(step.values, unit=aliases.get(units, units))
+        unit: Any = aliases.get(units, units)
+        values = pd.to_timedelta(step.values, unit=unit)
         return xr.DataArray(values, dims=step.dims, coords=step.coords)
     values = pd.to_timedelta(step.values)
     return xr.DataArray(values, dims=step.dims, coords=step.coords)
@@ -311,8 +313,8 @@ def _promote_time_coordinate(loaded_obj: xr.Dataset, name: str, policy: Dict[str
     if forecast_dims != ["time"]:
         ds = ds.stack(time=forecast_dims, create_index=False)
         values = np.asarray(valid.values).reshape(-1)
-        values = pd.to_datetime(values) if values.dtype.kind in ("U", "S") else values
-        ds = ds.assign_coords(time=("time", values))
+        time_values = pd.to_datetime(values) if values.dtype.kind in ("U", "S") else values
+        ds = ds.assign_coords(time=("time", time_values))
     else:
         ds = ds.assign_coords(time=valid)
     ds = ds.assign_coords(valid_time=ds["time"])

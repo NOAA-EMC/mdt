@@ -388,7 +388,10 @@ class PrefectEngine(Engine):
 
                     elif task_type == "pair_data":
                         # Resolve source and target node IDs from DAG metadata
-                        source_names = node_data.get("source_names", [node_data.get("source_name")])
+                        source_names = node_data.get("source_names")
+                        if not isinstance(source_names, list):
+                            single_source = node_data.get("source_name")
+                            source_names = [single_source] if isinstance(single_source, str) else []
                         target_name = node_data.get("target_name")
 
                         # Resolve node IDs from the actual predecessors in the DAG
@@ -396,6 +399,7 @@ class PrefectEngine(Engine):
                         source_node_ids = {
                             source_name: next((p for p in predecessors if dag.nodes[p].get("name") == source_name), None)
                             for source_name in source_names
+                            if isinstance(source_name, str)
                         }
                         target_node_id = next((p for p in predecessors if dag.nodes[p].get("name") == target_name), None)
 
@@ -404,7 +408,7 @@ class PrefectEngine(Engine):
                                 f"Failed to resolve predecessors for pairing '{node_id}'. Sources: {source_node_ids}, Target: {target_node_id}"
                             )
 
-                        source_output = {name: task_outputs.get(node_id) for name, node_id in source_node_ids.items()}
+                        source_output = {name: task_outputs[node_id] for name, node_id in source_node_ids.items() if node_id is not None}
                         if len(source_output) == 1:
                             source_output = next(iter(source_output.values()))
                         target_output = task_outputs.get(target_node_id) if target_node_id else None

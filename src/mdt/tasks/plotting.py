@@ -283,7 +283,7 @@ def generate_plot(
         if "{region}" not in savename_template:
             raise ValueError(f"Plot '{name}': savename must contain '{{region}}' placeholder when regions are specified.")
         region_var = _find_region_variable(input_data)
-        results = []
+        region_results = []
         for region in regions:
             filtered = _filter_by_region(input_data, region_var, region)
             if _is_empty(filtered):
@@ -292,8 +292,8 @@ def generate_plot(
             region_savename = savename_template.replace("{region}", _sanitize_region_name(region))
             region_kwargs = {**kwargs, "savename": region_savename}
             result = _generate_single_plot(name, plot_type, filtered, region_kwargs, track)
-            results.append(result)
-        return results
+            region_results.append(result)
+        return region_results
     else:
         return _generate_single_plot(name, plot_type, input_data, kwargs, track)
 

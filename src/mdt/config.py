@@ -111,7 +111,9 @@ class ConfigParser:
                             raise ValueError(f"Configuration validation failed: data.{name}.kwargs.time_axis has unknown role '{role}'.")
                         values = [candidates] if isinstance(candidates, str) else candidates
                         if not isinstance(values, list) or not values or not all(isinstance(value, str) and value.strip() for value in values):
-                            raise ValueError(f"Configuration validation failed: data.{name}.kwargs.time_axis.{role} must be a name or non-empty list of names.")
+                            raise ValueError(
+                                f"Configuration validation failed: data.{name}.kwargs.time_axis.{role} must be a name or non-empty list of names."
+                            )
 
                 zarr_store = details.get("zarr_store")
                 if zarr_store is not None:
