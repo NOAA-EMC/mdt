@@ -133,6 +133,46 @@ def test_load_data_gridded_reader_keeps_virtualizarr_ingestion(mocker):
     assert sent.get("use_icechunk") is True
 
 
+def test_load_data_retries_without_backend_rejected_option(mocker):
+    """A reader-namespace option that leaks to the storage backend is dropped and the load retried.
+
+    Reproduces the local-GRIB2 case where ``product`` is not consumed by the
+    grib2io backend and raises ``TypeError: ... unexpected keyword argument 'product'``.
+    """
+    from monetio.readers.errors import OptionUnsupportedError
+
+    ds = xr.Dataset({"val": (("x"), [1, 2, 3])})
+
+    def fake_load(source, **kwargs):
+        if "product" in kwargs:
+            raise OptionUnsupportedError("product", source)
+        return ds
+
+    mock_load = mocker.patch("monetio.load", side_effect=fake_load)
+
+    res = load_data("gcafs_model", "ncep_grib", {"files": "/data/gefs.*/12/chem/*.grib2", "product": "pgrb2ap5"})
+
+    assert "Loaded dataset 'gcafs_model'" in res.attrs["history"]
+    assert mock_load.call_count == 2
+    assert mock_load.call_args_list[0].kwargs.get("product") == "pgrb2ap5"
+    assert "product" not in mock_load.call_args_list[1].kwargs
+
+
+def test_load_data_reraises_when_rejected_option_not_in_kwargs(mocker):
+    """If the backend rejects an option MDT never sent, the error is not masked."""
+    from monetio.readers.errors import OptionUnsupportedError
+
+    def fake_load(source, **kwargs):
+        raise OptionUnsupportedError("something_else", source)
+
+    mock_load = mocker.patch("monetio.load", side_effect=fake_load)
+
+    with pytest.raises(OptionUnsupportedError):
+        load_data("ds", "ncep_grib", {"files": "/data/*.grib2"})
+
+    assert mock_load.call_count == 1
+
+
 def test_pair_data_double_check(mocker):
     """Test pair_data with both Eager (NumPy) and Lazy (Dask) data (Aero Protocol)."""
     # Setup mock data (NumPy)

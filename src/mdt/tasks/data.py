@@ -35,11 +35,28 @@ def _is_unsupported_keyword_type_error(error: TypeError) -> bool:
     return "unexpected keyword argument" in message or "takes no keyword arguments" in message
 
 
-def _is_as_xarray_rejection(error: BaseException) -> bool:
-    """True when a reader refused the ``as_xarray`` option specifically."""
-    if getattr(error, "option", None) == "as_xarray":
-        return True
-    return isinstance(error, TypeError) and "as_xarray" in str(error)
+def _unsupported_option_name(error: BaseException) -> str | None:
+    """Extract the option name a reader or storage backend rejected, if any.
+
+    A reader-namespace keyword that the reader does not consume leaks into the
+    storage backend (grib2io/h5netcdf), surfacing in one of two shapes: monetio's
+    ``OptionUnsupportedError`` (carrying ``.option`` / "does not support option
+    'X'") or the backend's own ``TypeError`` ("... unexpected keyword argument
+    'X'"). Returning the offending name lets the caller drop just that option and
+    retry, instead of failing the whole workflow or hardcoding option names.
+    """
+    option = getattr(error, "option", None)
+    if isinstance(option, str) and option:
+        return option
+
+    import re
+
+    message = str(error)
+    for pattern in (r"unexpected keyword argument '([^']+)'", r"does not support option '([^']+)'"):
+        match = re.search(pattern, message)
+        if match:
+            return match.group(1)
+    return None
 
 
 def _reader_accepts_as_xarray(dataset_type: str) -> bool:
@@ -662,24 +679,32 @@ def load_data(
 
     # 3. Standard Loading Pathway
     try:
-        try:
-            ds = monetio.load(dataset_type, **kwargs)
-        except Exception as e:
-            # Defensive: if the reader still refuses as_xarray (for example a
-            # reader that forwards **kwargs we could not introspect), retry once
-            # without it rather than failing the whole workflow.
-            if not kwargs.get("as_xarray") or not _is_as_xarray_rejection(e):
-                raise
-            logger.warning(
-                "Reader '%s' rejected as_xarray for '%s'; retrying without it.",
-                dataset_type,
-                name,
-            )
-            ds = monetio.load(dataset_type, **{k: v for k, v in kwargs.items() if k != "as_xarray"})
+        load_kwargs = dict(kwargs)
+        while True:
+            try:
+                ds = monetio.load(dataset_type, **load_kwargs)
+                break
+            except Exception as e:
+                # Reader-namespace options (as_xarray for tabular readers; URL
+                # builders like product/source/domain used only to discover files)
+                # leak into the storage backend when the reader does not consume
+                # them -- most visibly when loading local files. Drop the single
+                # rejected option and retry, bounded to options we actually sent.
+                option = _unsupported_option_name(e)
+                if option is None or option not in load_kwargs:
+                    raise
+                logger.warning(
+                    "Reader '%s' rejected option '%s' for '%s'; retrying without it.",
+                    dataset_type,
+                    option,
+                    name,
+                )
+                load_kwargs = {k: v for k, v in load_kwargs.items() if k != option}
+
         ds = _prefer_xarray_result(ds)
 
         # Provenance Tracking
-        msg = f"Loaded dataset '{name}' using type '{dataset_type}' with params {kwargs}."
+        msg = f"Loaded dataset '{name}' using type '{dataset_type}' with params {load_kwargs}."
         ds = update_history(ds, msg)
 
         logger.info("Successfully loaded dataset '%s'", name)
