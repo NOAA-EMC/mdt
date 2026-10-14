@@ -150,6 +150,55 @@ def _reader_supports_virtualizarr(dataset_type: str) -> bool:
     return issubclass(reader_cls, GriddedReader)
 
 
+# Fields a GRIB2 archive uses to name the cycle each record belongs to. A
+# 1-D variable named ``time`` is always promoted to a coordinate by xarray, so
+# the unindexed-dimension case can only carry its labels under another name.
+_TIME_VARIABLE_CANDIDATES = ("valid_time", "reference_time")
+
+
+def _promote_time_coordinate(loaded_obj: xr.Dataset, name: str) -> xr.Dataset:
+    """Use an in-band time variable as the ``time`` coordinate when one is missing.
+
+    GRIB2 messages carry their own ``time``/``valid_time`` fields, and when
+    several files are concatenated xarray produces a ``time`` *dimension* whose
+    coordinate is never set -- the cycle times stay as ordinary data variables.
+    Downstream pairing then fails to align the model against observations,
+    because alignment needs a real ``time`` index to match labels instead of
+    sizes. Prefer the times the archive already provides over asking the user to
+    rebuild them from ``dates``/``lead_time``.
+    """
+    if "time" not in loaded_obj.sizes or loaded_obj.sizes["time"] <= 1:
+        return loaded_obj
+    if "time" in loaded_obj.coords and loaded_obj.coords["time"].ndim > 0:
+        return loaded_obj
+
+    for candidate in _TIME_VARIABLE_CANDIDATES:
+        var = loaded_obj.variables.get(candidate)
+        if var is None or var.dims != ("time",):
+            continue
+        values = np.asarray(var.values)
+        # Only datetime or text fields actually name a cycle; a numeric field
+        # would be silently misread as an epoch offset.
+        if values.dtype.kind not in ("M", "U", "O"):
+            continue
+        try:
+            times = pd.to_datetime(values)
+        except (ValueError, TypeError):
+            continue
+        promoted = loaded_obj.assign_coords(time=("time", times))
+        if candidate != "time":
+            promoted = promoted.drop_vars(candidate, errors="ignore")
+        logger.info(
+            "Promoted in-band '%s' variable to the 'time' coordinate for '%s' (%d times).",
+            candidate,
+            name,
+            len(times),
+        )
+        return promoted
+
+    return loaded_obj
+
+
 def load_data(
     name: str,
     dataset_type: str,
@@ -237,6 +286,10 @@ def load_data(
                 if var in loaded_obj.variables:
                     loaded_obj[var] = loaded_obj[var] + shift
                     logger.info("Applied generic offset to variable '%s' of '%s' by shift %s", var, name, shift)
+
+        # Concatenated GRIB2 files keep their cycle times as data variables; use
+        # those directly rather than rebuilding the axis from the request options.
+        loaded_obj = _promote_time_coordinate(loaded_obj, name)
 
         # For GFS and GEFS datasets, GRIB2 loading of multiple lead times creates a 'time' dimension of size > 1,
         # but the time index/coordinate is missing or scalar. Reconstruct it before coordinate-based sel.

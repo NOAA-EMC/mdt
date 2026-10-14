@@ -173,6 +173,80 @@ def test_load_data_reraises_when_rejected_option_not_in_kwargs(mocker):
     assert mock_load.call_count == 1
 
 
+def test_load_data_promotes_inband_valid_time_variable(mocker):
+    """Concatenated GRIB2 keeps a 'time' dimension unindexed; its own valid_time field must become the coordinate.
+
+    Reproduces the local-file case where the archive carries the cycle times as
+    a data variable, so the loader should not require ``dates`` to rebuild them.
+    """
+    times = pd.date_range("2025-08-01", periods=4, freq="3h")
+    ds = xr.Dataset(
+        {
+            "val": (("time", "x"), np.arange(12, dtype="float64").reshape(4, 3)),
+            "valid_time": (("time",), times.values),
+        }
+    )
+    assert "time" not in ds.coords  # dimension only -- the GRIB2 concat shape
+    mocker.patch("monetio.load", return_value=ds)
+
+    res = load_data("gcafs_model", "ncep_grib", {"files": "/data/gefs.*/12/chem/*.grib2"})
+
+    assert "time" in res.coords
+    assert res.coords["time"].ndim == 1
+    np.testing.assert_array_equal(res["time"].values, times.values)
+    assert "valid_time" not in res.variables
+
+
+def test_load_data_promotes_reference_time_variable(mocker):
+    """When valid_time is absent, the GRIB2 reference_time field names the cycles."""
+    times = pd.date_range("2025-08-01", periods=4, freq="3h")
+    ds = xr.Dataset(
+        {
+            "val": (("time", "x"), np.arange(12, dtype="float64").reshape(4, 3)),
+            "reference_time": (("time",), times.values),
+        }
+    )
+    mocker.patch("monetio.load", return_value=ds)
+
+    res = load_data("gcafs_model", "ncep_grib", {"files": "/data/*.grib2"})
+
+    np.testing.assert_array_equal(res["time"].values, times.values)
+
+
+def test_load_data_reconstructs_time_from_dates_when_no_usable_time_variable(mocker):
+    """Numeric time fields are forecast hours, not labels, so the ``dates`` fallback still applies."""
+    ds = xr.Dataset(
+        {
+            "val": (("time", "x"), np.arange(6, dtype="float64").reshape(3, 2)),
+            "valid_time": (("time",), np.array([0.0, 3.0, 6.0])),
+        }
+    )
+    mocker.patch("monetio.load", return_value=ds)
+
+    res = load_data("gefs_model", "gefs", {"dates": "2025-08-01", "lead_time": [0, 3, 6]})
+
+    assert "time" in res.coords
+    assert res["time"].dt.strftime("%Y-%m-%d %H").values.tolist() == [
+        "2025-08-01 00",
+        "2025-08-01 03",
+        "2025-08-01 06",
+    ]
+
+
+def test_load_data_keeps_existing_time_coordinate(mocker):
+    """A dataset that already carries a proper time index is left untouched."""
+    times = pd.date_range("2025-08-01", periods=4, freq="3h")
+    ds = xr.Dataset(
+        {"val": (("time", "x"), np.arange(12, dtype="float64").reshape(4, 3))},
+        coords={"time": times},
+    )
+    mocker.patch("monetio.load", return_value=ds)
+
+    res = load_data("model", "gefs", {"files": "/data/*.grib2"})
+
+    assert res.coords["time"].equals(ds.coords["time"])
+
+
 def test_pair_data_double_check(mocker):
     """Test pair_data with both Eager (NumPy) and Lazy (Dask) data (Aero Protocol)."""
     # Setup mock data (NumPy)
