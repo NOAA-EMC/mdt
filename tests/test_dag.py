@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pytest
 
 from mdt.dag import DAGBuilder
@@ -122,3 +124,50 @@ def test_dag_builder_repeated_build_is_deterministic_and_does_not_mutate_config(
 
     assert first_nodes == second_nodes
     assert "use_kerchunk" not in config_data["model"]["kwargs"]
+
+
+def test_dag_reports_missing_source_in_multi_source_pairing():
+    """Report each unresolved model source with its list index."""
+    from mdt.dag import DAGBuilder
+
+    config = SimpleNamespace(
+        data={"obs": {"type": "gefs"}},
+        execution={"default_cluster": "compute"},
+        pairing={"eval": {"sources": ["missing", "also_missing"], "target": "obs"}},
+        combine={},
+        statistics={},
+        plots={},
+        reductions={},
+        save={},
+    )
+    with pytest.raises(ValueError, match=r"pairing.eval.sources\[0\].*missing") as exc:
+        DAGBuilder(config).build()
+    assert "pairing.eval.sources[1]" in str(exc.value)
+
+
+def test_dag_reports_empty_multi_source_pairing():
+    """Record an error when a pairing has an empty model list."""
+    config = DummyConfig({"obs": {"type": "gefs"}})
+    config.pairing = {"eval": {"sources": [], "target": "obs"}}
+    with pytest.raises(ValueError, match="at least one dataset reference"):
+        DAGBuilder(config).build()
+
+
+def test_dag_builds_edges_for_every_model_source():
+    """Build one pairing node with edges from each configured model."""
+    from mdt.dag import DAGBuilder
+
+    config = SimpleNamespace(
+        data={name: {"type": "gefs"} for name in ("a", "b", "obs")},
+        execution={"default_cluster": "compute"},
+        pairing={"eval": {"sources": ["a", "b"], "target": "obs", "model_dim": "experiment"}},
+        combine={},
+        statistics={},
+        plots={},
+        reductions={},
+        save={},
+    )
+    dag = DAGBuilder(config).build()
+    assert dag.nodes["pair_eval"]["source_names"] == ["a", "b"]
+    assert dag.nodes["pair_eval"]["model_dim"] == "experiment"
+    assert {("load_a", "pair_eval"), ("load_b", "pair_eval"), ("load_obs", "pair_eval")} <= set(dag.edges)

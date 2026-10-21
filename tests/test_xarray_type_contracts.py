@@ -75,6 +75,16 @@ def test_combine_rejects_mixed_xarray_types():
         combine_paired_data({"array": array, "dataset": array.to_dataset()})
 
 
+def test_combine_logs_and_reraises_xarray_concat_error(mocker, caplog):
+    """Preserve backend concat failures and record a useful error message."""
+    import logging
+
+    mocker.patch("mdt.tasks.pairing.xr.concat", side_effect=RuntimeError("coordinate conflict"))
+    with caplog.at_level(logging.ERROR), pytest.raises(RuntimeError, match="coordinate conflict"):
+        combine_paired_data({"first": xr.Dataset({"value": ("x", [1])})})
+    assert "Failed to combine xarray objects" in caplog.text
+
+
 @pytest.mark.parametrize("task", ["statistics", "plot"])
 def test_regional_tasks_require_a_dataset(task, tmp_path):
     """Region labels must come from a Dataset before filtering can begin."""
@@ -107,7 +117,9 @@ def test_timeseries_overlay_uses_xarray_line_plot(mocker, tmp_path, color):
     data = xr.Dataset({"first": ("time", [1.0, 2.0]), "second": ("time", [3.0, 4.0])}, coords={"time": pd.date_range("2023-08-01", periods=2)})
     path = tmp_path / "series.png"
     result = _generate_static_plot(
-        "series", "timeseries", data,
+        "series",
+        "timeseries",
+        data,
         {"columns": {"first": {"label": "First"}, "second": {"label": "Second", "color": color}}, "savename": str(path)},
     )
     assert len(result.ax.lines) == 2

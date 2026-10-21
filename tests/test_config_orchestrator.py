@@ -198,3 +198,67 @@ class TestEcFlowKeysAccessible:
         cfg = ConfigParser(path)
         assert cfg.execution.get("orchestrator") == "ecflow"
         assert cfg.orchestrator == "ecflow"
+
+
+def test_pairing_configuration_requires_source_and_target(_write_yaml):
+    """Reject pairings that omit either endpoint."""
+    path = _write_yaml("""\
+        data:
+          obs: {type: aeronet}
+        pairing:
+          eval: {target: obs}
+    """)
+    with pytest.raises(ValueError, match="must specify 'source'.*and 'target'"):
+        ConfigParser(path)
+
+
+@pytest.mark.parametrize(
+    ("time_axis", "message"),
+    [
+        ("not-a-map", "must be a mapping"),
+        ({"bogus": "time"}, "unknown role"),
+        ({"lead_time": []}, "non-empty list"),
+        ({"valid_time": ["time", ""]}, "non-empty list"),
+    ],
+)
+def test_config_rejects_invalid_time_axis(_write_time_axis_config, time_axis, message):
+    """Reject malformed coordinate role mappings."""
+    with pytest.raises(ValueError, match=message):
+        ConfigParser(_write_time_axis_config(time_axis))
+
+
+@pytest.fixture
+def _write_time_axis_config(tmp_path):
+    import yaml
+
+    def write(time_axis):
+        path = tmp_path / "config.yaml"
+        path.write_text(yaml.safe_dump({"data": {"model": {"type": "gefs", "kwargs": {"time_axis": time_axis}}}}))
+        return path
+
+    return write
+
+
+def test_config_accepts_time_axis_aliases_and_multi_source_pairing(tmp_path):
+    """Allow role aliases and a valid list of source datasets."""
+    import yaml
+
+    config = {
+        "data": {"a": {"type": "gefs", "kwargs": {"time_axis": {"valid_time": "valid", "lead_time": ["step", "lead"]}}}, "b": {"type": "gefs"}},
+        "pairing": {"eval": {"sources": ["a", "b"], "target": "a", "model_dim": "experiment"}},
+    }
+    path = tmp_path / "valid.yaml"
+    path.write_text(yaml.safe_dump(config))
+    parsed = ConfigParser(path)
+    assert parsed.pairing["eval"]["sources"] == ["a", "b"]
+
+
+@pytest.mark.parametrize("sources", [[], ["model", ""]])
+def test_config_rejects_invalid_multi_model_sources(tmp_path, sources):
+    """Require non-empty names for each configured model source."""
+    import yaml
+
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump({"data": {"model": {"type": "gefs"}}, "pairing": {"eval": {"sources": sources, "target": "obs"}}}))
+    with pytest.raises(ValueError, match="sources must be a non-empty list"):
+        ConfigParser(path)

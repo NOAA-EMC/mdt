@@ -16,6 +16,7 @@ from mdt.engine import PrefectEngine
 @pytest.fixture
 def prefect_runtime(monkeypatch):
     """Run task bodies locally while preserving Prefect's future input contract."""
+
     def resolve(value):
         if isinstance(value, Future):
             return value.result()
@@ -84,7 +85,10 @@ def test_prefect_forwards_mask_to_pairing(prefect_runtime, mocker, tmp_path, mod
     query_mask = mocker.patch("monet.util.mask.query_mask", side_effect=lambda data, name: data.assign(land=("x", ["North", "South"])))
     if mask:
         dag.add_node(
-            "stats_eval", task_type="compute_statistics", name="stats", metrics=["mb"],
+            "stats_eval",
+            task_type="compute_statistics",
+            name="stats",
+            metrics=["mb"],
             kwargs={"regions": ["North"], "savename": str(tmp_path / "stats_{region}.csv")},
         )
         dag.add_edge("pair_eval", "stats_eval")
@@ -174,3 +178,144 @@ def test_single_model_pairing_consumes_mdt_options(mocker):
     pair_data("single", "nearest", data, data, kwargs)
     assert backend.call_args.kwargs == {"method": "nearest", "interp_time": True}
     assert kwargs == {"model_dim": "experiment", "interp_time": True}
+
+
+def test_prefect_accepts_legacy_single_source_node_metadata(prefect_runtime, mocker):
+    """Resolve the legacy source_name field when source_names is absent."""
+    dag = pairing_dag()
+    del dag.nodes["pair_eval"]["source_names"]
+    dag.nodes["pair_eval"]["source_name"] = "model0"
+    dataset = xr.Dataset({"value": ("x", [1.0])})
+    mocker.patch("mdt.engine.load_data", return_value=dataset)
+    pairing = mocker.patch("mdt.engine.prefect_pair_data", return_value=dataset)
+    config = SimpleNamespace(execution={"pairing_mode": "serial", "clusters": {"compute": {"mode": "local"}}})
+
+    PrefectEngine(dag, config).execute()
+
+    assert isinstance(pairing.call_args.kwargs["source_data"], xr.Dataset)
+
+
+def test_serial_pairing_waits_for_previous_pair_result(prefect_runtime, mocker):
+    """Resolve an earlier local pairing result before starting the next pair."""
+    dag = pairing_dag()
+    dag.add_node("load_model1", task_type="load_data", name="model1", dataset_type="example", kwargs={})
+    dag.add_node(
+        "pair_second",
+        task_type="pair_data",
+        name="second",
+        method="nearest",
+        kwargs={},
+        source_names=["model1"],
+        target_name="obs",
+        model_dim="model",
+        mask=None,
+    )
+    dag.add_edge("load_model1", "pair_second")
+    dag.add_edge("load_obs", "pair_second")
+    dataset = xr.Dataset({"value": ("x", [1.0])})
+    mocker.patch("mdt.engine.load_data", return_value=dataset)
+    pairing = mocker.patch("mdt.engine.prefect_pair_data", return_value=dataset)
+    config = SimpleNamespace(execution={"pairing_mode": "serial", "clusters": {"compute": {"mode": "local"}}})
+
+    PrefectEngine(dag, config).execute()
+
+    assert pairing.call_count == 2
+
+
+def test_multimodel_pairing_rejects_empty_sources():
+    """Reject an empty mapping before invoking the pairing backend."""
+    from mdt.tasks.pairing import pair_data
+
+    with pytest.raises(ValueError, match="at least one source"):
+        pair_data("eval", "nearest", {}, xr.Dataset(), {})
+
+
+def test_duplicate_gridded_time_is_dropped(caplog):
+    """Drop repeated timestamps from ordinary gridded data."""
+    import pandas as pd
+
+    from mdt.tasks.pairing import _drop_duplicate_time_entries
+
+    data = xr.Dataset({"value": (("time", "x"), [[1], [2]])}, coords={"time": pd.to_datetime(["2025-08-01", "2025-08-01"]), "x": [0]})
+    result = _drop_duplicate_time_entries(data, "model", "source")
+    assert result.sizes["time"] == 1
+    assert "keeping first occurrence" in caplog.text
+
+
+def test_spatial_coordinate_aliases_are_added_and_redundant_2d_aliases_removed():
+    """Create 1D aliases and remove redundant 2D coordinate aliases."""
+    import numpy as np
+
+    from mdt.tasks.pairing import _harmonize_spatial_coordinates
+
+    one_dimensional = xr.Dataset(coords={"latitude": ("y", [40.0]), "longitude": ("x", [-100.0])})
+    aliased = _harmonize_spatial_coordinates(one_dimensional)
+    np.testing.assert_array_equal(aliased.lat.values, aliased.latitude.values)
+    np.testing.assert_array_equal(aliased.lon.values, aliased.longitude.values)
+
+    two_dimensional = xr.Dataset(
+        coords={
+            "lat": ("y", [40.0]),
+            "lon": ("x", [-100.0]),
+            "latitude": (("y", "x"), [[40.0]]),
+            "longitude": (("y", "x"), [[-100.0]]),
+        }
+    )
+    canonical = _harmonize_spatial_coordinates(two_dimensional)
+    assert "latitude" not in canonical.coords
+    assert "longitude" not in canonical.coords
+
+
+def test_duplicate_valid_times_from_forecast_cycles_are_preserved(caplog):
+    """Retain repeated valid times when they belong to different cycles."""
+    import pandas as pd
+
+    from mdt.tasks.pairing import _drop_duplicate_time_entries
+
+    times = pd.to_datetime(["2025-08-01", "2025-08-01"])
+    data = xr.Dataset(
+        {"value": (("time", "x"), [[1], [2]])},
+        coords={
+            "time": times,
+            "x": [0],
+            "forecast_reference_time": ("time", pd.to_datetime(["2025-08-01", "2025-07-31"])),
+            "lead_time": ("time", [0, 24]),
+        },
+    )
+    with caplog.at_level(logging.INFO):
+        result = _drop_duplicate_time_entries(data, "model", "source")
+    assert result.sizes["time"] == 2
+    assert "preserving all forecast records" in caplog.text
+
+
+def test_multimodel_pairing_combines_results_and_collapses_shared_fields(mocker):
+    """Combine model fields while storing identical observations once."""
+    from mdt.tasks.pairing import pair_data
+
+    first = xr.Dataset({"obs": ("x", [1.0]), "mod": ("x", [2.0])})
+    second = xr.Dataset({"obs": ("x", [1.0]), "mod": ("x", [3.0])})
+    mocker.patch("mdt.tasks.pairing._ensure_esmf_manager")
+    mocker.patch("monet.util.combinetool.pair", side_effect=[first, second])
+    result = pair_data("eval", "nearest", {"a": first, "b": second}, first, {"model_dim": "experiment"})
+    assert result.attrs["mdt_model_dim"] == "experiment"
+    assert result.mod.dims == ("experiment", "x")
+    assert result.obs.dims == ("x",)
+
+
+def test_multimodel_pairing_skips_fields_without_model_dimension(mocker):
+    """Leave already shared fields untouched while inspecting model variables."""
+    from mdt.tasks.pairing import pair_data
+
+    source = xr.Dataset({"value": ("x", [1.0])})
+    combined = xr.Dataset(
+        {"mod": (("experiment", "x"), [[1.0], [2.0]]), "obs": ("x", [3.0])},
+        coords={"experiment": ["a", "b"]},
+    )
+    mocker.patch("mdt.tasks.pairing._ensure_esmf_manager")
+    mocker.patch("monet.util.combinetool.pair", return_value=source)
+    mocker.patch("mdt.tasks.pairing.combine_paired_data", return_value=combined)
+
+    result = pair_data("eval", "nearest", {"a": source, "b": source}, source, {"model_dim": "experiment"})
+
+    assert result.obs.dims == ("x",)
+    assert result.mod.dims == ("experiment", "x")
