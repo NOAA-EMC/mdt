@@ -434,3 +434,13 @@ class TestRegionVariableDetection:
                     "regions": ["North America"],
                 },
             )
+
+
+def test_multimodel_plot_splits_savename_and_dispatches(mocker, tmp_path):
+    """Dispatch a separate plot per model with sanitized filenames."""
+    data = xr.Dataset({"obs": (("model", "x"), [[1.0], [2.0]])}, coords={"model": ["model a", "model/b"]})
+    dispatch = mocker.patch("mdt.tasks.plotting._generate_single_plot", side_effect=["first", "second"])
+    result = generate_plot("multi", "histogram", data, {"savename": str(tmp_path / "plot.png")})
+    assert result == {"model a": "first", "model/b": "second"}
+    assert dispatch.call_args_list[0].args[3]["savename"].endswith("plot_model_a.png")
+    assert dispatch.call_args_list[1].args[3]["savename"].endswith("plot_model_b.png")

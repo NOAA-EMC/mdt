@@ -305,7 +305,7 @@ def _promote_time_coordinate(loaded_obj: xr.Dataset, name: str, policy: Dict[str
     if "forecast_reference_time" not in ds and "lead_time" in ds:
         ds = ds.assign_coords(forecast_reference_time=valid - _time_delta(ds["lead_time"]))
     if valid_name != "valid_time" and valid_name in ds:
-        ds = ds.assign_coords(valid_time=ds[valid_name])
+        ds = ds.assign_coords(valid_time=valid)
         valid = ds["valid_time"]
     elif "valid_time" in ds:
         valid = ds["valid_time"]

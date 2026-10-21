@@ -61,7 +61,7 @@ prerelease = true
 prerelease_token = "dev"
 
 [tool.semantic_release.changelog]
-template_dir = ""
+template_dir = "templates"
 
 [tool.semantic_release.commit_parser_options]
 allowed_tags = ["build", "chore", "ci", "docs", "feat", "fix", "perf", "style", "refactor", "test"]

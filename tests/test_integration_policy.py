@@ -18,7 +18,7 @@ markers =
     ecflow: real ecFlow
     hpc: real scheduler
 """)
-    pytester.makepyfile('''
+    pytester.makepyfile("""
 import pytest
 
 
@@ -45,6 +45,6 @@ def test_hpc():
 @pytest.mark.ecflow
 def test_combined():
     pass
-''')
+""")
     result = pytester.runpytest_subprocess("-q", *options)
     result.assert_outcomes(passed=passed, skipped=skipped)

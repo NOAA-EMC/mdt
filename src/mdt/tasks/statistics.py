@@ -264,10 +264,7 @@ def _execute_metric(
         raise ValueError("allow_unweighted_fallback must be a boolean.")
 
     # Filter out MDT-specific keys for the standard metric call
-    call_kwargs = {
-        k: v for k, v in kwargs.items()
-        if k not in ["obs_var", "mod_var", "weights", "dim", "savename", "allow_unweighted_fallback"]
-    }
+    call_kwargs = {k: v for k, v in kwargs.items() if k not in ["obs_var", "mod_var", "weights", "dim", "savename", "allow_unweighted_fallback"]}
 
     if isinstance(data, (xr.Dataset, xr.DataArray)):
         # 1. Extract Target Data
@@ -331,8 +328,7 @@ def _execute_metric(
                     "Choose a weighted metric or explicitly set allow_unweighted_fallback: true."
                 )
             fallback_message = (
-                f"Metric '{metric_name}' computed unweighted because it does not support requested weights; "
-                "allow_unweighted_fallback=True."
+                f"Metric '{metric_name}' computed unweighted because it does not support requested weights; allow_unweighted_fallback=True."
             )
             logger.warning(fallback_message)
 

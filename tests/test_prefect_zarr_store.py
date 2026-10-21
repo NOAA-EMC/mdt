@@ -53,13 +53,16 @@ class TestPrefectVirtualiZarrIntegration:
     @pytest.fixture(autouse=True)
     def setup_mocks(self, mocker):
         """Setup Prefect and Dask mocks for engine tests."""
-        mocker.patch.dict(sys.modules, {
-            "prefect": prefect_mock,
-            "prefect.cache_policies": prefect_cache_policies_mock,
-            "prefect.task_runners": prefect_task_runners_mock,
-            "prefect_dask": prefect_dask_mock,
-            "prefect_dask.task_runners": prefect_dask_task_runners_mock,
-        })
+        mocker.patch.dict(
+            sys.modules,
+            {
+                "prefect": prefect_mock,
+                "prefect.cache_policies": prefect_cache_policies_mock,
+                "prefect.task_runners": prefect_task_runners_mock,
+                "prefect_dask": prefect_dask_mock,
+                "prefect_dask.task_runners": prefect_dask_task_runners_mock,
+            },
+        )
         # Reset mocks before each test
         prefect_mock.task.reset_mock()
         prefect_mock.flow.reset_mock()
