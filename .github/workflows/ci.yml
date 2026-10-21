@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, develop, fix/workflow-reliability]
   pull_request:
     branches: [main, develop]
   workflow_call:
@@ -15,7 +15,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v5
       - name: Lint
-        run: uvx ruff check src/ tests/
+        run: uv run --frozen --only-group lint ruff check src/ tests/
 
   type-check:
     runs-on: ubuntu-latest
@@ -37,10 +37,10 @@ jobs:
       - name: Install dependencies
         shell: bash -el {0}
         run: |
-          uv pip install -e ".[all]" mypy types-PyYAML types-networkx pandas-stubs
+          uv sync --active --frozen --all-extras --inexact
       - name: Type Check
         shell: bash -el {0}
-        run: uv run mypy src/mdt
+        run: uv run --active --frozen --all-extras --inexact mypy src/mdt
 
   test:
     runs-on: ubuntu-latest
@@ -72,12 +72,12 @@ jobs:
       - name: Install dependencies
         shell: bash -el {0}
         run: |
-          uv pip install -e ".[all]" pytest-cov
+          uv sync --active --frozen --all-extras --inexact
 
       - name: Test
         shell: bash -el {0}
         run: |
-          uv run pytest tests/ -v --tb=short --cov=src/mdt --cov-report=xml
+          uv run --active --frozen --all-extras --inexact pytest tests/ -v --tb=short --cov=src/mdt --cov-report=xml
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4

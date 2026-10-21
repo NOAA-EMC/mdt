@@ -8,22 +8,16 @@ MDT requires Python 3.11+ and several components from the MONET ecosystem. For t
 
 ```bash
 # Create and activate environment
-mamba create -n mdt python=3.11
+mamba create -n mdt -c conda-forge python=3.11 esmpy uv c-compiler
 mamba activate mdt
 
-# Install MONET ecosystem from GitHub
-pip install git+https://github.com/bbakernoaa/monetio.git@develop
-pip install git+https://github.com/bbakernoaa/monet.git@feature/interp_improvements
-pip install git+https://github.com/noaa-oar-arl/monet-stats
-pip install git+https://github.com/bbakernoaa/monet-plots.git --no-deps
-
-# Install MDT with its local Prefect and Dask execution dependencies
-git clone https://github.com/noaa-oar-arl/mvs.git
-cd mvs
-pip install -e '.[prefect,dask]'
+# Install MDT with tested dependencies from the committed lockfile
+git clone https://github.com/NOAA-EMC/mdt.git
+cd mdt
+uv sync --active --frozen --extra prefect --extra dask --inexact
 ```
 
-For development, install `pip install -e '.[prefect,dask,dev]'`. MDT's `prefect` and `dask` extras provide the respective optional runtime packages. MDT does not publish an `ecflow` extra: ecFlow Python bindings and the client are provided by the operational environment.
+For development, add `--extra dev` to the `uv sync` command. MDT's `prefect` and `dask` extras provide the respective optional runtime packages. MDT does not publish an `ecflow` extra: ecFlow Python bindings and the client are provided by the operational environment.
 
 The default pairing mode is `serial` to avoid concurrent ESMF calls. Set `execution.pairing_mode: concurrent` only when parallel ESMF pairing is supported in your environment.
 
@@ -88,3 +82,10 @@ mdt run simple_eval.yaml
 ```
 
 MDT will automatically load the data, pair the model output to the observation locations, compute the requested statistics, and save a spatial plot.
+
+The locked `uv sync` command reproduces the tested dependency set. `--active`
+uses the activated Conda environment and `--inexact` retains its ESMF bindings.
+A C compiler is required to build the MONET interpolation dependency. Ordinary
+`pip install -e ".[prefect,dask]"` pins the direct MONET revisions but does not
+lock all transitive dependencies. For ecFlow execution, install `ecflow` from
+Conda Forge in the operational environment; MDT does not install its bindings.

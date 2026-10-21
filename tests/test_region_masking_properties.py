@@ -443,7 +443,7 @@ class TestRegionFilteringProperty:
         """Filtering by a region that exists in the dataset produces a subset
         containing only data points with that region label.
         """
-        ds, region_var, region_labels = data
+        ds, region_var, _region_labels = data
 
         # Pick a region that exists in the dataset
         # (all generated labels are assigned to at least the label list,
@@ -474,7 +474,7 @@ class TestRegionFilteringProperty:
         """The number of points in the filtered result equals the number of
         points with that region label in the original dataset.
         """
-        ds, region_var, region_labels = data
+        ds, region_var, _region_labels = data
 
         present_labels = set(ds[region_var].values)
         assume(len(present_labels) > 0)

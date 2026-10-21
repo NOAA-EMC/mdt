@@ -20,22 +20,16 @@ MDT requires Python 3.11+. We recommend using a Conda/Mamba environment.
 
 ```bash
 # Create and activate environment
-mamba create -n mdt python=3.11
+mamba create -n mdt -c conda-forge python=3.11 esmpy uv c-compiler
 mamba activate mdt
 
-# Install dependencies from MONET ecosystem
-pip install git+https://github.com/bbakernoaa/monetio.git@develop
-pip install git+https://github.com/bbakernoaa/monet.git@feature/interp_improvements
-pip install git+https://github.com/noaa-oar-arl/monet-stats
-pip install git+https://github.com/bbakernoaa/monet-plots.git --no-deps
-
-# Install MDT
-git clone https://github.com/noaa-oar-arl/mvs.git
-cd mvs
-pip install -e '.[prefect,dask]'
+# Install MDT with tested dependencies from the committed lockfile
+git clone https://github.com/NOAA-EMC/mdt.git
+cd mdt
+uv sync --active --frozen --extra prefect --extra dask --inexact
 ```
 
-The base install (`pip install -e .`) includes MDT's core dependencies. Add `prefect` for the Prefect runner and `dask` for local distributed or HPC execution; use `pip install -e '.[prefect,dask,dev]'` in a development environment. MDT does not publish an `ecflow` extra. ecFlow Python bindings and the client are supplied by the operational environment where the ecFlow server runs.
+The base install (`pip install -e .`) includes MDT's core dependencies. Add `prefect` for the Prefect runner and `dask` for local distributed or HPC execution; add `--extra dev` to the locked installation command in a development environment. MDT does not publish an `ecflow` extra. ecFlow Python bindings and the client are supplied by the operational environment where the ecFlow server runs.
 
 ## Quick Start
 
@@ -69,3 +63,10 @@ mdt --help
 ## Documentation
 
 For more detailed information, please visit our [official documentation](https://NOAA-EMC.github.io/mdt/).
+
+The locked `uv sync` command reproduces the tested dependency set. `--active`
+uses the activated Conda environment and `--inexact` retains its ESMF bindings.
+A C compiler is required to build the MONET interpolation dependency. Ordinary
+`pip install -e ".[prefect,dask]"` pins the direct MONET revisions but does not
+lock all transitive dependencies. For ecFlow execution, install `ecflow` from
+Conda Forge in the operational environment; MDT does not install its bindings.
