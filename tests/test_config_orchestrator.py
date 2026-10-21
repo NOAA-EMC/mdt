@@ -1,5 +1,7 @@
 """Tests for ConfigParser orchestrator and ecFlow configuration support."""
 
+import copy
+import re
 import textwrap
 
 import pytest
@@ -34,6 +36,52 @@ class TestOrchestratorProperty:
         """)
         cfg = ConfigParser(path)
         assert cfg.orchestrator == "prefect"
+
+    @pytest.mark.parametrize(
+        ("body", "message"),
+        [
+            ("data: []", "'data' section must be a dictionary"),
+            ("data:\n  model: {type: cmaq, kwargs: invalid}", "data.model.kwargs must be a mapping"),
+            ("data:\n  model: {type: cmaq}\nexecution: []", "'execution' section must be a dictionary"),
+            ("data:\n  model: {type: cmaq}\nexecution:\n  pairing_mode: parallel", "execution.pairing_mode must be 'serial' or 'concurrent'"),
+            ("data:\n  model: {type: cmaq}\ncombine:\n  all: {sources: bad}", "combine.all.sources must be a non-empty list"),
+            ("data:\n  model: {type: cmaq}\nexecution:\n  clusters: []", "execution.clusters must be a mapping"),
+            ("data:\n  model: {type: cmaq}\nexecution:\n  clusters:\n    compute: {mode: local, workers: 0}", "workers must be a positive integer"),
+            ("data:\n  model: {type: cmaq}\nexecution:\n  clusters:\n    compute: {mode: mystery}", "mode must be one of"),
+            (
+                "data:\n  model: {type: cmaq}\nexecution:\n  default_cluster: missing\n  clusters:\n    compute: {mode: local}",
+                "is not defined in execution.clusters",
+            ),
+            ("data:\n  model: {type: cmaq}\nexecution:\n  clusters: {}", "must contain at least one cluster"),
+            ("data:\n  model: {type: cmaq}\nstatistics:\n  stats: {input: pair_model}\n", "non-empty list of metric names"),
+            ("data:\n  model: {type: cmaq}\nstatistics:\n  stats: {input: pair_model, metrics: []}\n", "non-empty list of metric names"),
+        ],
+    )
+    def test_malformed_sections_and_pairing_mode_are_rejected(self, _write_yaml, body, message):
+        with pytest.raises(ValueError, match=re.escape(message)):
+            ConfigParser(_write_yaml(body))
+
+    def test_execution_property_does_not_mutate_source_config(self, _write_yaml):
+        path = _write_yaml("""\
+            data:
+              model: {type: cmaq}
+            execution:
+              default_cluster: compute
+              clusters:
+                compute: {mode: local}
+        """)
+        cfg = ConfigParser(path)
+        before = copy.deepcopy(cfg.config["execution"])
+        first = cfg.execution
+        second = cfg.execution
+        assert first == second
+        assert cfg.config["execution"] == before
+
+    @pytest.mark.parametrize("pairing_mode", ["serial", "concurrent"])
+    def test_pairing_mode_accepts_supported_values(self, _write_yaml, pairing_mode):
+        path = _write_yaml(f"data:\n  model: {{type: cmaq}}\nexecution:\n  pairing_mode: {pairing_mode}\n")
+        cfg = ConfigParser(path)
+        assert cfg.execution["pairing_mode"] == pairing_mode
 
     def test_orchestrator_ecflow_from_yaml(self, _write_yaml):
         """When orchestrator is set to 'ecflow', property returns 'ecflow'."""

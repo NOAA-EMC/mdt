@@ -2,11 +2,13 @@ name: mdt
 channels:
   - conda-forge
 dependencies:
-  - python>=3.9
+  - python>=3.11
   - pip
+  - uv
+  - c-compiler
   - networkx
   - pyyaml
-  - prefect>=2.0.0
+  - prefect>=3.0.0
   - prefect-dask
   - dask
   - dask-jobqueue

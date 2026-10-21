@@ -2,11 +2,18 @@ from unittest.mock import MagicMock
 
 import numpy as np
 import pandas as pd
+import pytest
 import xarray as xr
 
 from mdt.tasks.data import load_data
 from mdt.tasks.pairing import pair_data
 from mdt.tasks.statistics import compute_statistics
+
+
+@pytest.fixture(autouse=True)
+def _mock_esmf_manager(mocker):
+    """Keep mock-data workflow tests independent of ESMF initialization."""
+    mocker.patch("mdt.tasks.pairing._ensure_esmf_manager")
 
 
 def test_viirs_icap_workflow(mocker):

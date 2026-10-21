@@ -63,7 +63,7 @@ def test_execute_metric_no_manual_fallback_rmse(mocker):
     mocker.patch("mdt.tasks.statistics._find_metric", return_value=mock_rmse_no_weights)
 
     # 3. Execute
-    kwargs = {"obs_var": "obs", "mod_var": "mod", "weights": "w", "dim": ["lat", "lon"]}
+    kwargs = {"obs_var": "obs", "mod_var": "mod", "weights": "w", "dim": ["lat", "lon"], "allow_unweighted_fallback": True}
     results = compute_statistics("test_fallback", ["RMSE"], ds, kwargs)
 
     # 4. Verify result (unweighted calculation)

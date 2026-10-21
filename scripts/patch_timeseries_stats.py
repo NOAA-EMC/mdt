@@ -16,13 +16,12 @@ Run this script once:
     python scripts/patch_timeseries_stats.py
 """
 
-import importlib
 import inspect
 import re
 import sys
 
 
-def find_source_file():
+def find_source_file() -> str:
     """Locate the timeseries.py source file from the installed monet_plots package."""
     try:
         from monet_plots.plots import timeseries
@@ -93,7 +92,8 @@ def apply_patch(content: str) -> str:
         if in_init and "self.df = normalize_data" in line:
             insert_idx = i + 1
             # Detect indentation from the current line
-            indent = re.match(r"(\s*)", line).group(1)
+            indent_match = re.match(r"(\s*)", line)
+            indent = indent_match.group(1) if indent_match is not None else ""
             break
 
     if insert_idx is None:
@@ -113,7 +113,8 @@ def apply_patch(content: str) -> str:
                 break
             if in_init and "super().__init__" in line:
                 insert_idx = i + 1
-                indent = re.match(r"(\s*)", line).group(1)
+                indent_match = re.match(r"(\s*)", line)
+                indent = indent_match.group(1) if indent_match is not None else ""
                 break
 
     if insert_idx is None:
@@ -130,7 +131,7 @@ def apply_patch(content: str) -> str:
     return "".join(lines)
 
 
-def main():
+def main() -> None:
     source_path = find_source_file()
     print(f"Found source: {source_path}")
 

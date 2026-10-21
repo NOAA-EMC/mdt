@@ -28,9 +28,14 @@ The `data` section defines the sources of information for your verification.
 MDT supports virtualizing large datasets to enable efficient, random access without needing to convert the original files to Zarr. This is particularly useful for large model outputs stored in NetCDF or GRIB format.
 
 *   **`enabled`**: Set to `true` to enable virtualization.
-*   **`backend`**: The virtualization engine to use (`kerchunk_json`, `kerchunk_parquet`, or `icechunk`).
-*   **`store_path`**: The local or cloud path where the virtual index will be stored.
-*   **`icechunk_repo`**: (Required for `icechunk`) The path to the Icechunk repository.
+*   **`backend`**: The virtualization engine to use (`kerchunk_json`, `kerchunk_parquet`, `icechunk`, or `zarr`).
+*   **`store_path`**: The local or cloud path where the virtual index or Zarr store is located.
+*   **`icechunk_url`**: (Required for `icechunk`) The path/URL to the Icechunk repository. This is user/environment specific (do not copy example values literally). Legacy key `icechunk_repo` is still accepted for backward compatibility.
+*   **`existing`**: (Optional) If `true`, MDT will attempt to load an existing Zarr or Icechunk store directly instead of generating virtual references.
+*   **`zarr_kwargs`**: (Optional) Additional keyword arguments passed to `xarray.open_zarr`.
+*   **`max_scan_attempts`**: (Optional) Number of retry attempts when scanning GRIB2 files (default: reader-specific).
+*   **`network_timeout`**: (Optional) Network timeout in seconds for remote requests.
+*   **`max_concurrent_requests`**: (Optional) Maximum number of concurrent network requests for parallel scanning.
 
 ```yaml
 data:
@@ -52,24 +57,72 @@ data:
     zarr_store:
       enabled: true
       backend: "icechunk"
-      icechunk_repo: "s3://my-bucket/gefs-repo"
+      icechunk_url: "s3://<your-bucket>/<your-gefs-icechunk-repo>"
+
+  # Example pointing to an existing Zarr store (e.g. preprocessed AERONET)
+  aeronet_zarr:
+    type: "aeronet"  # Type still required by schema
+    zarr_store:
+      enabled: true
+      backend: "zarr"
+      existing: true
+      store_path: "s3://my-bucket/aeronet-zarr"
 ```
+
+### Local GRIB2 files
+
+For local GEFS, GFS, or `ncep_grib` inputs, `files` may be a file pattern, a
+list of patterns, or a directory containing GRIB files. MDT expands local
+patterns in sorted order before loading and reports a clear error when nothing
+matches. Remote URLs are passed through to the reader unchanged.
+
+Time normalization is generic. MDT leaves datasets with an ordinary `time`
+coordinate unchanged. For forecast datasets, declare coordinate roles under
+`kwargs.time_axis`, or use CF `standard_name` metadata. MDT uses valid time for
+the pairing `time` axis and retains forecast reference and lead coordinates.
+The coordinate values come from the loaded data; MDT does not infer them from
+requested date or lead lists.
+
+```yaml
+data:
+  local_gefs:
+    type: "gefs"
+    kwargs:
+      files: "/data/gefs/2025/08/**/*.grib2"
+      filters:
+        shortName: "totAOD550"
+      time_axis:
+        valid_time: [valid_time, time]
+        forecast_reference_time: [forecast_reference_time, reference_time, time]
+        lead_time: [lead_time, forecast_period, step]
+```
+
+Use `sel` to choose cycles or lead values before normalization, for example
+`sel: {lead_time: 6}`.
 
 ---
 
 ## 2. `pairing` Section
 
-Pairing tasks align two datasets together.
+Pairing tasks align model datasets to a target dataset. Use `source` for one model, or `sources` for several models that share the same target.
 
 *   **`source`**: The name of the source dataset (usually a model).
+*   **`sources`**: A list of source dataset names (alternative to `source`). The output uses a model dimension, so same-named variables from different models remain distinct.
 *   **`target`**: The name of the target dataset (usually observations).
 *   **`method`**: The pairing algorithm (`interpolate` or `regrid`).
 *   **`kwargs`**: Additional arguments for the pairing function.
+*   **`model_dim`**: The model coordinate name for multi-source pairing (defaults to `model`).
 
 For model-to-model comparison using `regrid`, you can use `merge_target: true` to include the target model in the output.
 
 ```yaml
 pairing:
+  gefs_gfs_aeronet:
+    sources: [gefs_model, gfs_model]
+    target: aeronet_obs
+    method: bilinear
+    model_dim: model
+
   # Model vs Obs (Interpolation)
   cmaq_airnow:
     source: "cmaq_output"
@@ -152,9 +205,14 @@ Configure how and where tasks are executed.
 
 *   **`default_cluster`**: The name of the cluster to use for tasks (defaults to `compute`).
 *   **`clusters`**: A dictionary of cluster definitions.
+*   **`pairing_mode`**: Local pairing scheduling mode: `serial` (default) avoids concurrent ESMF calls; `concurrent` allows independent pairing tasks to run in parallel. Task dependencies are respected in both modes.
+*   **`ecflow_poll_interval`**: Seconds between ecFlow status checks (default: `5`; must be positive).
+*   **`ecflow_timeout`**: Maximum seconds to wait for an ecFlow suite (default: `86400`, one day). Set to `null` for an unbounded wait.
+*   **`ecflow_data_dir`**: Shared POSIX root for intermediate ecFlow task artifacts. Defaults to `<task_script_dir>/<suite_name>/data`; MDT creates a unique run directory beneath it. Every ecFlow execution node must see the same path. Xarray results use Zarr; non-data plot outputs are not handed to downstream tasks.
 
 ```yaml
 execution:
+  pairing_mode: serial  # Use concurrent only when parallel ESMF pairing is supported in your environment.
   default_cluster: "local_cpu"
   clusters:
     local_cpu:

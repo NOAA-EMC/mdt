@@ -4,26 +4,28 @@ from unittest.mock import MagicMock, patch
 
 import networkx as nx
 import pytest
+import xarray as xr
 
 # Create a fake prefect module before anything else
 prefect_mock = types.ModuleType("prefect")
 prefect_mock.task = MagicMock()
 prefect_mock.flow = MagicMock()
 prefect_mock.get_run_logger = MagicMock()
+prefect_cache_policies_mock = types.ModuleType("prefect.cache_policies")
+prefect_cache_policies_mock.NONE = object()
+prefect_task_runners_mock = types.ModuleType("prefect.task_runners")
+prefect_task_runners_mock.ConcurrentTaskRunner = MagicMock()
 
 prefect_dask_mock = types.ModuleType("prefect_dask")
 prefect_dask_task_runners_mock = types.ModuleType("prefect_dask.task_runners")
 prefect_dask_mock.task_runners = prefect_dask_task_runners_mock
 prefect_dask_task_runners_mock.DaskTaskRunner = MagicMock()
 
-sys.modules["prefect"] = prefect_mock
-sys.modules["prefect_dask"] = prefect_dask_mock
-sys.modules["prefect_dask.task_runners"] = prefect_dask_task_runners_mock
 
 # Don't mock dask at module level as it breaks xarray
 # Instead, we will patch what we need inside the tests
 
-from mdt.engine import PrefectEngine  # noqa: E402
+from mdt.engine import PrefectEngine
 
 
 class TestPrefectVirtualiZarrIntegration:
@@ -51,6 +53,13 @@ class TestPrefectVirtualiZarrIntegration:
     @pytest.fixture(autouse=True)
     def setup_mocks(self, mocker):
         """Setup Prefect and Dask mocks for engine tests."""
+        mocker.patch.dict(sys.modules, {
+            "prefect": prefect_mock,
+            "prefect.cache_policies": prefect_cache_policies_mock,
+            "prefect.task_runners": prefect_task_runners_mock,
+            "prefect_dask": prefect_dask_mock,
+            "prefect_dask.task_runners": prefect_dask_task_runners_mock,
+        })
         # Reset mocks before each test
         prefect_mock.task.reset_mock()
         prefect_mock.flow.reset_mock()
@@ -139,7 +148,7 @@ class TestPrefectVirtualiZarrIntegration:
         # prefect_load_data is a function defined at module level
         # We MUST mock monetio because calling it triggers environment-dependent imports/validation
         mock_monetio = MagicMock()
-        mock_monetio.load.return_value = MagicMock()
+        mock_monetio.load.return_value = xr.Dataset({"value": ("x", [1.0])})
 
         with patch.dict("sys.modules", {"monetio": mock_monetio}):
             mdt.engine.prefect_load_data(name="my_vz", dataset_type="merra2", kwargs=vz_kwargs)

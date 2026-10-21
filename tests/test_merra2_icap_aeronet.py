@@ -129,10 +129,11 @@ def test_merra2_icap_aeronet_full_workflow(sample_data_files, mocker):
     results = compute_statistics("workflow_stats", metrics, combined, stats_kwargs)
 
     # MDT tasks often lowercase metric names
-    assert "rmse" in results
-    assert "mb" in results
-    assert isinstance(results["rmse"], xr.DataArray)
-    assert "Computed rmse" in results["rmse"].attrs["history"]
+    assert set(results) == {"icap", "merra2"}
+    for model in results:
+        assert set(results[model]) == {"rmse", "mb"}
+        assert isinstance(results[model]["rmse"], xr.DataArray)
+        assert "Computed rmse" in results[model]["rmse"].attrs["history"]
 
 
 def test_merra2_vs_icap_bias_workflow(sample_data_files, mocker):

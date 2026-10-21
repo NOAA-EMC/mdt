@@ -233,7 +233,7 @@ class TestEcFlowWrapperScriptContent:
         engine.generate_task_wrappers()
 
         content = self._read_script(engine, "load_obs")
-        assert "%ZARR_STORE_ENABLED%" in content
+        assert "decode('%ZARR_STORE_ENABLED_B64%')" in content
 
     def test_wrapper_contains_conditional_logic_for_disabled(self, _fake_ecflow, _make_config, tmp_path):
         """The wrapper has if/else logic that only injects VirtualiZarr params when enabled."""
@@ -258,7 +258,7 @@ class TestEcFlowWrapperScriptContent:
         assert "kwargs['use_virtualizarr'] = True" in content
 
     def test_wrapper_reads_all_zarr_store_variables(self, _fake_ecflow, _make_config, tmp_path):
-        """The wrapper reads ZARR_STORE_BACKEND, ZARR_STORE_PATH, and ZARR_STORE_ICECHUNK_REPO."""
+        """The wrapper decodes the Zarr backend, path, and Icechunk URL safely."""
         from mdt.ecflow_engine import EcFlowEngine
 
         dag = nx.DiGraph()
@@ -274,9 +274,9 @@ class TestEcFlowWrapperScriptContent:
         engine.generate_task_wrappers()
 
         content = self._read_script(engine, "load_obs")
-        assert "%ZARR_STORE_BACKEND%" in content
-        assert "%ZARR_STORE_PATH%" in content
-        assert "%ZARR_STORE_ICECHUNK_REPO%" in content
+        assert "decode('%ZARR_STORE_BACKEND_B64%')" in content
+        assert "decode('%ZARR_STORE_PATH_B64%')" in content
+        assert "decode('%ZARR_STORE_ICECHUNK_URL_B64%')" in content
 
 
 class TestEcFlowZarrStoreVariablesUnit:

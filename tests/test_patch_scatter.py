@@ -14,7 +14,6 @@ import pytest
 
 from scripts.patch_scatter import apply_patch, is_already_patched
 
-
 # ---------------------------------------------------------------------------
 # Fixtures: simulated ScatterPlot source files
 # ---------------------------------------------------------------------------

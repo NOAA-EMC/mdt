@@ -2,8 +2,27 @@ data:
   gfs_model:
     type: "gfs"
     kwargs:
-      dates: "2023-08-01"
-      lead_time: [0, 3, 6, 9, 12, 15, 18, 21, 24]
+      dates: ["2023-08-01","2023-08-02","2023-08-03","2023-08-04","2023-08-05"]
+      lead_time: [0, 3, 6, 9, 12, 15, 18, 21]
+      # grib2io/xarray backend filtering compatible with PR 246 workflows
+      filters:
+        typeOfFirstFixedSurface: 103 # 2 m above ground level
+        shortName: "TMP"
+      isel:
+        height_above_ground: 0
+      rename:
+        temperature: "TMP_2maboveground"
+        TMP: "TMP_2maboveground"
+      offset:
+        TMP_2maboveground: -273.15 # Kelvin to Celsius
+    zarr_store:
+      enabled: true
+      backend: "icechunk"
+      # Required only when backend is "icechunk"; set to your own repo path.
+      icechunk_url: "./zarr_stores/gfs_t2m_icechunk"
+      max_scan_attempts: 5
+      network_timeout: 60.0
+      max_concurrent_requests: 16
 
   ish_lite_obs:
     type: "ish_lite"
@@ -14,7 +33,7 @@ pairing:
   pair_gfs_ish:
     source: "gfs_model"
     target: "ish_lite_obs"
-    method: "bilinear"
+    method: "nearest"
 
 statistics:
   met_stats:
@@ -31,6 +50,7 @@ plots:
     type: "timeseries"
     kwargs:
       savename: "gfs_ish_temp_ts.png"
+      spatial_mean: true
       columns:
         t2m:
           label: "ISH-Lite"
@@ -64,7 +84,7 @@ plots:
       savename: "gfs_ish_spatial_bias.png"
       col1: "t2m"
       col2: "TMP_2maboveground"
-      fact: 0.05
+      fact: 0.03
 
   radar_plot:
     input: "pair_gfs_ish"
@@ -73,3 +93,11 @@ plots:
       savename: "gfs_ish_radar.png"
       obs_col: "t2m"
       mod_cols: ["TMP_2maboveground"]
+
+  conditional_quantile_temp:
+    input: "pair_gfs_ish"
+    type: "conditional_quantile"
+    kwargs:
+      savename: "gfs_ish_conditional_quantile.png"
+      obs_col: "t2m"
+      mod_col: "TMP_2maboveground"

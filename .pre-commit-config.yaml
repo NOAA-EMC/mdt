@@ -10,4 +10,5 @@ repos:
     hooks:
       - id: mypy
         additional_dependencies: [types-PyYAML, types-networkx, pandas-stubs]
-        args: [--config-file, pyproject.toml]
+        pass_filenames: false
+        args: [--config-file, pyproject.toml, src, scripts]

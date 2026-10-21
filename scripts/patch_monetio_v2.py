@@ -6,12 +6,13 @@ Fixes:
 2. PandasDriver: Skip files that don't exist on S3 instead of failing the entire load.
 """
 
+import os
 import shutil
 
 DRIVERS_PATH = "/opt/homebrew/Caskroom/miniforge/base/envs/mdt/lib/python3.14/site-packages/monetio/readers/drivers.py"
 
 
-def apply_patches():
+def apply_patches() -> None:
     with open(DRIVERS_PATH) as f:
         lines = f.readlines()
 
@@ -24,9 +25,9 @@ def apply_patches():
     # This shadows the module-level import and causes UnboundLocalError
     for i, line in enumerate(lines):
         if i > 200 and i < 300 and line.strip() == "import os":
-            indent = line[:len(line) - len(line.lstrip())]
+            indent = line[: len(line) - len(line.lstrip())]
             lines[i] = f"{indent}pass  # import os removed (using module-level)\n"
-            print(f"✓ Removed local 'import os' at line {i+1}")
+            print(f"✓ Removed local 'import os' at line {i + 1}")
             break
 
     # === PATCH 3: Fix XarrayDriver S3 + grib2io handling ===
@@ -40,22 +41,22 @@ def apply_patches():
             start_idx = i - 2
             if "filename.startswith" in lines[start_idx]:
                 # Get the indentation
-                indent = lines[start_idx][:len(lines[start_idx]) - len(lines[start_idx].lstrip())]
+                indent = lines[start_idx][: len(lines[start_idx]) - len(lines[start_idx].lstrip())]
                 inner = indent + "    "
                 inner2 = inner + "    "
 
                 new_block = [
                     f"{indent}# Logic for standard engine/remote access\n",
-                    f"{indent}if filename.startswith(\"s3://\") or filename.startswith(\"http\"):\n",
-                    f"{inner}engine = xr_kwargs.get(\"engine\", None)\n",
-                    f"{inner}if engine == \"grib2io\":\n",
+                    f'{indent}if filename.startswith("s3://") or filename.startswith("http"):\n',
+                    f'{inner}engine = xr_kwargs.get("engine", None)\n',
+                    f'{inner}if engine == "grib2io":\n',
                     f"{inner2}# grib2io requires a local file path — download from S3\n",
                     f"{inner2}import tempfile\n",
                     f"{inner2}import hashlib\n",
-                    f"{inner2}_cache_dir = os.path.join(tempfile.gettempdir(), \"monetio_grib_cache\")\n",
+                    f'{inner2}_cache_dir = os.path.join(tempfile.gettempdir(), "monetio_grib_cache")\n',
                     f"{inner2}os.makedirs(_cache_dir, exist_ok=True)\n",
                     f"{inner2}_hash = hashlib.md5(filename.encode()).hexdigest()\n",
-                    f"{inner2}_ext = os.path.splitext(filename)[-1] or \".grib2\"\n",
+                    f'{inner2}_ext = os.path.splitext(filename)[-1] or ".grib2"\n',
                     f"{inner2}_local_path = os.path.join(_cache_dir, _hash + _ext)\n",
                     f"{inner2}if not os.path.exists(_local_path):\n",
                     f"{inner2}    fs = FileUtility.get_fs(filename)\n",
@@ -81,7 +82,7 @@ def apply_patches():
                     start_idx -= 1
 
                 lines[start_idx:end_idx] = new_block
-                print(f"✓ Patched XarrayDriver S3+grib2io handling (lines {start_idx+1}-{end_idx})")
+                print(f"✓ Patched XarrayDriver S3+grib2io handling (lines {start_idx + 1}-{end_idx})")
                 break
     else:
         print("WARNING: Could not find XarrayDriver S3 handling code to patch")
@@ -93,9 +94,9 @@ def apply_patches():
     for i, line in enumerate(lines):
         if "for f in file_list:" in line and i > 400:
             # Check this is the right one (non-lazy path, after "data_frames = []")
-            context = "".join(lines[max(0, i-10):i])
-            if "data_frames" in context and "lazy" not in lines[i-1]:
-                indent = line[:len(line) - len(line.lstrip())]
+            context = "".join(lines[max(0, i - 10) : i])
+            if "data_frames" in context and "lazy" not in lines[i - 1]:
+                indent = line[: len(line) - len(line.lstrip())]
                 inner = indent + "    "
                 inner2 = inner + "    "
 
@@ -110,7 +111,7 @@ def apply_patches():
                 if append_idx:
                     # Replace the for loop with a try/except version
                     # Get the original body lines
-                    body_lines = lines[i+1:append_idx+1]
+                    body_lines = lines[i + 1 : append_idx + 1]
 
                     new_for_block = [line]  # keep the "for f in file_list:" line
                     new_for_block.append(f"{inner}try:\n")
@@ -123,9 +124,9 @@ def apply_patches():
                     new_for_block.append(f"{inner}except FileNotFoundError:\n")
                     new_for_block.append(f"{inner2}continue\n")
 
-                    lines[i:append_idx+1] = new_for_block
+                    lines[i : append_idx + 1] = new_for_block
                     patched_pandas = True
-                    print(f"✓ Patched PandasDriver to skip missing files")
+                    print("✓ Patched PandasDriver to skip missing files")
                 break
 
     if not patched_pandas:
@@ -141,12 +142,12 @@ def apply_patches():
 if __name__ == "__main__":
     # Backup
     backup_path = DRIVERS_PATH + ".bak"
-    if not shutil.os.path.exists(backup_path):
+    if not os.path.exists(backup_path):
         shutil.copy2(DRIVERS_PATH, backup_path)
         print(f"✓ Backed up original to {backup_path}")
     else:
         # Restore from backup first to ensure clean state
         shutil.copy2(backup_path, DRIVERS_PATH)
-        print(f"✓ Restored from backup for clean patching")
+        print("✓ Restored from backup for clean patching")
 
     apply_patches()

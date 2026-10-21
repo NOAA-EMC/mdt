@@ -61,6 +61,7 @@ class TestEcFlowEngineInit:
         assert engine.port == 3141
         assert engine.suite_name == "mdt"
         assert engine.task_script_dir == "./ecflow_tasks/"
+        assert engine.timeout == 86400
 
     def test_custom_config_values(self, _fake_ecflow, simple_dag, _make_config):
         """Explicit config values override the defaults."""
@@ -80,6 +81,12 @@ class TestEcFlowEngineInit:
         assert engine.port == 4000
         assert engine.suite_name == "my_suite"
         assert engine.task_script_dir == "/tmp/ecf_scripts/"
+
+    def test_custom_wait_timeout(self, _fake_ecflow, simple_dag, _make_config):
+        from mdt.ecflow_engine import EcFlowEngine
+
+        engine = EcFlowEngine(simple_dag, _make_config({"ecflow_timeout": 42}))
+        assert engine.timeout == 42
 
     def test_port_cast_to_int(self, _fake_ecflow, simple_dag, _make_config):
         """Port is always stored as int even when YAML provides a string."""
@@ -130,7 +137,7 @@ class TestEcFlowEngineLazyImport:
 
         from mdt.ecflow_engine import EcFlowEngine
 
-        with pytest.raises(ImportError, match="ecFlow is not installed"):
+        with pytest.raises(ImportError, match="ecFlow Python bindings are not installed"):
             EcFlowEngine(simple_dag, _make_config())
 
 
@@ -176,8 +183,8 @@ class TestEcFlowEngineStubs:
         mock_client.load.assert_called_once_with(fake_defs)
         mock_client.begin_suite.assert_called_once_with("mdt")
 
-    def test_execute_returns_started_result(self, _fake_ecflow, simple_dag, _make_config, tmp_path):
-        """execute() calls build_suite, generate_task_wrappers, _load_and_start and returns result."""
+    def test_execute_returns_completed_result(self, _fake_ecflow, simple_dag, _make_config, tmp_path):
+        """execute() waits for its configured suite waiter and returns completion."""
         from mdt.ecflow_engine import EcFlowEngine
 
         cfg = _make_config({"task_script_dir": str(tmp_path / "ecf_scripts")})
@@ -186,10 +193,11 @@ class TestEcFlowEngineStubs:
         # Replace Client with a proper mock so _load_and_start succeeds
         mock_client = MagicMock(name="Client-instance")
         engine.ecflow.Client = MagicMock(return_value=mock_client)
+        engine._wait_for_suite = lambda: None
 
         result = engine.execute()
 
-        assert result == {"suite": "mdt", "status": "started"}
+        assert result == {"suite": "mdt", "status": "complete"}
 
 
 # ---------------------------------------------------------------------------
@@ -272,6 +280,8 @@ def multi_node_dag():
         "pair_merra2_aeronet",
         task_type="pair_data",
         name="merra2_aeronet",
+        source_name="merra2",
+        target_name="aeronet",
         method="interpolate",
         kwargs={"radius": 50},
         cluster="compute",
@@ -287,8 +297,8 @@ def full_pipeline_dag():
     g = nx.DiGraph()
     g.add_node("load_obs", task_type="load_data", name="obs", dataset_type="aeronet", kwargs={})
     g.add_node("load_model", task_type="load_data", name="model", dataset_type="merra2", kwargs={})
-    g.add_node("pair_obs_model", task_type="pair_data", name="obs_model", kwargs={})
-    g.add_node("combine_all", task_type="combine_paired_data", name="all", kwargs={})
+    g.add_node("pair_obs_model", task_type="pair_data", name="obs_model", source_name="obs", target_name="model", kwargs={})
+    g.add_node("combine_all", task_type="combine_paired_data", name="all", sources=["obs_model"], kwargs={})
     g.add_node("stats_bias", task_type="compute_statistics", name="bias", kwargs={}, metrics=["mb", "rmse"])
     g.add_node("plot_spatial", task_type="generate_plot", name="spatial", kwargs={}, plot_type="spatial")
 
@@ -309,14 +319,14 @@ def full_pipeline_dag():
 class TestBuildSuiteFamilyCreation:
     """Requirement 4.1 — one ecFlow family per task type."""
 
-    def test_all_five_families_created(self, _tracking_ecflow, full_pipeline_dag, _make_config):
-        """build_suite creates families for load, pair, combine, statistics, plot."""
+    def test_all_task_families_created(self, _tracking_ecflow, full_pipeline_dag, _make_config):
+        """build_suite creates families for every supported DAG task type."""
         from mdt.ecflow_engine import EcFlowEngine
 
         engine = EcFlowEngine(full_pipeline_dag, _make_config())
         engine.build_suite()
 
-        expected = {"load", "pair", "combine", "statistics", "plot"}
+        expected = {"load", "pair", "combine", "statistics", "plot", "reduction", "save"}
         assert set(_tracking_ecflow["families"].keys()) == expected
 
     def test_families_added_to_suite(self, _tracking_ecflow, full_pipeline_dag, _make_config):
@@ -327,16 +337,16 @@ class TestBuildSuiteFamilyCreation:
         engine.build_suite()
 
         suite = _tracking_ecflow["suites"][0]
-        assert suite.add_family.call_count == 5
+        assert suite.add_family.call_count == 7
 
     def test_families_created_even_without_matching_nodes(self, _tracking_ecflow, simple_dag, _make_config):
-        """All five families are created even if the DAG only has load nodes."""
+        """All supported task families are created even if the DAG only has load nodes."""
         from mdt.ecflow_engine import EcFlowEngine
 
         engine = EcFlowEngine(simple_dag, _make_config())
         engine.build_suite()
 
-        expected = {"load", "pair", "combine", "statistics", "plot"}
+        expected = {"load", "pair", "combine", "statistics", "plot", "reduction", "save"}
         assert set(_tracking_ecflow["families"].keys()) == expected
 
 
@@ -433,6 +443,17 @@ class TestBuildSuiteVariables:
         assert v["TASK_NAME"] == "merra2"
         assert v["DATASET_TYPE"] == "merra2"
         assert v["TASK_KWARGS"] == "{}"
+        assert v["TASK_KWARGS_B64"]
+        assert v["TASK_NAME_B64"]
+
+    def test_wrapper_script_uses_encoded_user_values(self):
+        """Quote-sensitive configuration is substituted through base64 tokens."""
+        from mdt.ecflow_engine import _build_wrapper_script
+
+        script = _build_wrapper_script("load_test", "/usr/bin/python")
+        assert "decode('%TASK_NAME_B64%')" in script
+        assert "json.loads(decode('%TASK_KWARGS_B64%'))" in script
+        assert "decode('%URL_B64%')" in script
 
     def test_pair_node_kwargs_serialized(self, _tracking_ecflow, multi_node_dag, _make_config):
         """Pair node kwargs are JSON-serialized."""
@@ -445,6 +466,8 @@ class TestBuildSuiteVariables:
 
         v = _tracking_ecflow["tasks"]["pair_merra2_aeronet"]._variables
         assert json.loads(v["TASK_KWARGS"]) == {"radius": 50}
+        assert json.loads(__import__("base64").b64decode(v["TASK_KWARGS_B64"])) == {"radius": 50}
+        assert json.loads(__import__("base64").b64decode(v["TASK_KWARGS_B64"])) == {"radius": 50}
 
     def test_metrics_and_plot_type_variables(self, _tracking_ecflow, full_pipeline_dag, _make_config):
         """Statistics node has METRICS; plot node has PLOT_TYPE."""
@@ -466,7 +489,11 @@ class TestBuildSuiteVariables:
         from mdt.ecflow_engine import EcFlowEngine
 
         g = nx.DiGraph()
-        g.add_node("pair_x", task_type="pair_data", name="x", kwargs={})
+        g.add_node("load_source", task_type="load_data", name="source", dataset_type="fake", kwargs={})
+        g.add_node("load_target", task_type="load_data", name="target", dataset_type="fake", kwargs={})
+        g.add_node("pair_x", task_type="pair_data", name="x", source_name="source", target_name="target", kwargs={})
+        g.add_edge("load_source", "pair_x")
+        g.add_edge("load_target", "pair_x")
         engine = EcFlowEngine(g, _make_config())
         engine.build_suite()
 
@@ -634,9 +661,9 @@ class TestGenerateTaskWrappersScriptContent:
         engine.generate_task_wrappers()
 
         content = self._read_script(engine, "load_obs")
-        assert "%TASK_TYPE%" in content
-        assert "%TASK_NAME%" in content
-        assert "%TASK_KWARGS%" in content
+        assert "%TASK_TYPE_B64%" in content
+        assert "%TASK_NAME_B64%" in content
+        assert "%TASK_KWARGS_B64%" in content
 
     def test_script_contains_dispatch_for_load_data(self, _fake_ecflow, simple_dag, _make_config, tmp_path):
         """Script includes the dispatch import for load_data task type."""
@@ -664,6 +691,25 @@ class TestGenerateTaskWrappersScriptContent:
         assert "from mdt.tasks.pairing import combine_paired_data" in content
         assert "from mdt.tasks.statistics import compute_statistics" in content
         assert "from mdt.tasks.plotting import generate_plot" in content
+
+    def test_wrapper_has_durable_input_and_output_handoff(self, _fake_ecflow, full_pipeline_dag, _make_config):
+        """Each wrapper reads upstream artifacts and writes its own result."""
+        import re
+
+        from mdt.ecflow_engine import EcFlowEngine, _build_wrapper_script
+
+        engine = EcFlowEngine(full_pipeline_dag, _make_config())
+        engine.build_suite()
+        script = _build_wrapper_script("stats_bias", engine.python_executable)
+        assert "load_artifact(data_dir, upstream_id)" in script
+        assert "save_artifact(data_dir, node_id, result)" in script
+        assert "source_inputs = load_artifact(data_dir, source_inputs)" in script
+        assert "input_data=inputs['input']" in script
+        compile(re.sub(r"%[A-Z0-9_]+%", "safe", script), "wrapper.ecf", "exec")
+        assert engine._input_node_ids("pair_obs_model", full_pipeline_dag.nodes["pair_obs_model"]) == {
+            "source": "load_obs",
+            "target": "load_model",
+        }
 
     def test_script_has_shebang_line(self, _fake_ecflow, simple_dag, _make_config, tmp_path):
         """Each wrapper starts with a Python shebang."""
@@ -727,6 +773,7 @@ class TestExecuteFlow:
         engine.build_suite = tracked_build
         engine.generate_task_wrappers = tracked_gen
         engine._load_and_start = tracked_load
+        engine._wait_for_suite = lambda: None
 
         engine.execute()
 
@@ -829,8 +876,8 @@ class TestExecuteFlow:
 
         assert exc_info.value.__cause__ is original
 
-    def test_execute_returns_suite_name_and_status(self, _fake_ecflow, simple_dag, _make_config, tmp_path):
-        """execute() returns dict with suite name and 'started' status."""
+    def test_execute_returns_suite_name_and_completed_status(self, _fake_ecflow, simple_dag, _make_config, tmp_path):
+        """execute() waits for terminal status and returns a completed result."""
         from mdt.ecflow_engine import EcFlowEngine
 
         cfg = _make_config(
@@ -843,10 +890,58 @@ class TestExecuteFlow:
 
         mock_client = MagicMock(name="Client-instance")
         engine.ecflow.Client = MagicMock(return_value=mock_client)
+        engine._wait_for_suite = lambda: None
 
         result = engine.execute()
 
-        assert result == {"suite": "my_workflow", "status": "started"}
+        assert result == {"suite": "my_workflow", "status": "complete"}
+        mock_client.close.assert_called_once()
+
+    def test_empty_workflow_completes_without_submitting_suite(self, _fake_ecflow, _make_config):
+        """An empty DAG returns success without starting a suite that cannot complete."""
+        from mdt.ecflow_engine import EcFlowEngine
+
+        engine = EcFlowEngine(nx.DiGraph(), _make_config())
+        engine.ecflow.Client = MagicMock()
+
+        assert engine.execute() == {"suite": "mdt", "status": "complete"}
+        engine.ecflow.Client.assert_not_called()
+
+    def test_wait_for_suite_polls_until_complete(self, _fake_ecflow, simple_dag, _make_config):
+        from mdt.ecflow_engine import EcFlowEngine
+
+        engine = EcFlowEngine(simple_dag, _make_config())
+        suite = MagicMock()
+        suite.get_state.side_effect = ["active", "complete"]
+        defs = MagicMock()
+        defs.find_suite.return_value = suite
+        client = MagicMock()
+        client.get_defs.return_value = defs
+        engine.client = client
+        engine.poll_interval = 0
+
+        engine._wait_for_suite()
+
+        assert client.sync_local.call_count == 2
+
+    def test_wait_for_suite_reports_aborted_task(self, _fake_ecflow, simple_dag, _make_config):
+        from mdt.ecflow_engine import EcFlowEngine
+
+        engine = EcFlowEngine(simple_dag, _make_config())
+        failed_task = MagicMock()
+        failed_task.get_state.return_value = "aborted"
+        failed_task.get_abs_node_path.return_value = "/mdt/load/load_obs"
+        suite = MagicMock()
+        suite.get_state.return_value = "aborted"
+        suite.get_all_nodes.return_value = [failed_task]
+        defs = MagicMock()
+        defs.find_suite.return_value = suite
+        client = MagicMock()
+        client.get_defs.return_value = defs
+        engine.client = client
+
+        with pytest.raises(RuntimeError, match="/mdt/load/load_obs"):
+            engine._wait_for_suite()
 
     def test_load_failure_raises_runtime_error(self, _fake_ecflow, simple_dag, _make_config):
         """If client.load() fails, RuntimeError is raised with host/port."""
@@ -860,3 +955,100 @@ class TestExecuteFlow:
 
         with pytest.raises(RuntimeError, match="localhost"):
             engine._load_and_start(MagicMock())
+
+
+@pytest.fixture
+def run_generated_wrapper(_tracking_ecflow, _make_config, tmp_path):
+    """Execute generated task code with ecFlow variable substitution and real artifacts."""
+    import re
+    from pathlib import Path
+
+    from mdt.ecflow_engine import EcFlowEngine
+
+    sys.modules["ecflow"].Client = MagicMock()
+    engines = {}
+
+    def run(dag, node_id):
+        if id(dag) not in engines:
+            engines[id(dag)] = EcFlowEngine(
+                dag, _make_config({"task_script_dir": str(tmp_path / "scripts"), "ecflow_data_dir": str(tmp_path / "data")})
+            )
+            # All wrappers in this simulated run share one artifact namespace.
+            engines[id(dag)].data_dir = tmp_path / "data"
+        engine = engines[id(dag)]
+        engine.build_suite()
+        paths = engine.generate_task_wrappers()
+        script_path = next(Path(path) for path in paths if Path(path).stem == node_id)
+        variables = dict(_tracking_ecflow["tasks"][node_id]._variables)
+        variables.update(ECF_NAME=f"/mdt/{node_id}", ECF_PASS="test", ECF_TRYNO="1")  # noqa: S106 — simulated ecFlow client
+        script = re.sub(r"%([A-Z0-9_]+)%", lambda match: str(variables[match[1]]), script_path.read_text())
+        client = sys.modules["ecflow"].Client.return_value
+        client.reset_mock()
+        exec(compile(script, str(script_path), "exec"), {})
+        client.child_complete.assert_called_once()
+        client.child_abort.assert_not_called()
+
+    return run
+
+
+@pytest.mark.parametrize("source_count", [1, 2])
+@pytest.mark.parametrize("mask", [None, "land"])
+def test_generated_pipeline_loads_pairing_artifacts(run_generated_wrapper, tmp_path, mocker, source_count, mask):
+    """Single and multi-model wrappers pass datasets through pairing into statistics."""
+    import xarray as xr
+
+    from mdt.ecflow_io import load_artifact
+
+    dag = nx.DiGraph()
+    sources = [f"model{i}" for i in range(source_count)]
+    for name in [*sources, "obs"]:
+        dag.add_node(f"load_{name}", task_type="load_data", name=name, dataset_type="example", kwargs={})
+    dag.add_node(
+        "pair_eval", task_type="pair_data", name="eval", source_names=sources, target_name="obs", model_dim="experiment", mask=mask, kwargs={}
+    )
+    dag.add_edges_from((f"load_{name}", "pair_eval") for name in [*sources, "obs"])
+    stats_kwargs = {"regions": ["North"], "savename": str(tmp_path / "stats_{region}.csv")} if mask else {}
+    dag.add_node("stats_eval", task_type="compute_statistics", name="summary", metrics=["mb"], kwargs=stats_kwargs)
+    dag.add_edge("pair_eval", "stats_eval")
+
+    def load(name, **kwargs):
+        return xr.Dataset({"value": ("x", [1.0, 3.0] if name == "obs" else [2.0, 5.0])})
+
+    def pair(source_data, target_data, kwargs, **other):
+        assert kwargs["model_dim"] == "experiment"
+        assert other["mask"] == mask
+        assert isinstance(target_data, xr.Dataset)
+        if source_count == 1:
+            assert isinstance(source_data, xr.Dataset)
+            model = source_data.value
+        else:
+            assert list(source_data) == sources
+            assert all(isinstance(value, xr.Dataset) for value in source_data.values())
+            model = xr.concat([value.value for value in source_data.values()], dim="experiment")
+        paired = xr.Dataset({"obs": target_data.value, "mod": model})
+        return paired.assign(land=("x", ["North", "South"])) if mask else paired
+
+    mocker.patch("mdt.tasks.data.load_data", side_effect=load)
+    mocker.patch("mdt.tasks.pairing.pair_data", side_effect=pair)
+    mocker.patch("mdt.tasks.statistics._find_metric", return_value=lambda obs, mod: (mod - obs).mean())
+    for node_id in nx.topological_sort(dag):
+        run_generated_wrapper(dag, node_id)
+    result = load_artifact(tmp_path / "data", "stats_eval")
+    assert float(result["North"]["mb"] if mask else result["mb"]) == (1.0 if mask else 1.5)
+
+
+def test_generated_pairing_aborts_for_missing_source(run_generated_wrapper, multi_node_dag, tmp_path, mocker):
+    """A missing source artifact aborts the child task with its upstream ID."""
+    import xarray as xr
+
+    from mdt.ecflow_io import save_artifact
+
+    save_artifact(tmp_path / "data", "load_aeronet", xr.Dataset({"obs": ("x", [1.0])}))
+    pair = mocker.patch("mdt.tasks.pairing.pair_data")
+    with pytest.raises(SystemExit) as exc:
+        run_generated_wrapper(multi_node_dag, "pair_merra2_aeronet")
+    assert exc.value.code == 1
+    client = sys.modules["ecflow"].Client.return_value
+    assert "load_merra2" in client.child_abort.call_args.args[0]
+    client.child_complete.assert_not_called()
+    pair.assert_not_called()

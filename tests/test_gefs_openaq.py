@@ -9,8 +9,9 @@ from mdt.tasks.pairing import pair_data
 from mdt.tasks.statistics import compute_statistics
 
 
-def test_gefs_openaq_workflow(mocker):
+def test_gefs_openaq_workflow(mocker, tmp_path):
     """Test GEFS-Aerosol model paired with OpenAQ observations."""
+    mocker.patch("mdt.tasks.pairing._ensure_esmf_manager")
     # 1. Setup Mock Data
     times = pd.date_range("2023-01-01", periods=2, freq="h")
     lats = np.linspace(30, 50, 5)
@@ -21,8 +22,7 @@ def test_gefs_openaq_workflow(mocker):
         {"dust": (("time", "lat", "lon"), np.random.rand(2, 5, 5))}, coords={"time": times, "lat": lats, "lon": lons}, attrs={"history": "Initial"}
     )
 
-    # OpenAQ Mock (Pandas-like DataFrame, but load_data returns what reader gives)
-    # Most obs readers return DataFrames by default, or Xarray if requested.
+    # OpenAQ mock source data is tabular, but its MonetIO reader contract returns xarray.
     openaq_df = pd.DataFrame({"time": [times[0], times[1]], "lat": [40.0, 41.0], "lon": [-100.0, -101.0], "pm25": [10.5, 12.0]})
 
     # 2. Mock monetio.load
@@ -38,7 +38,9 @@ def test_gefs_openaq_workflow(mocker):
     mocker.patch("monetio.load", side_effect=mock_load)
 
     # 3. Execution
-    ds_mod = load_data("gefs_data", "gefs", {"files": "dummy.nc"})
+    grib_file = tmp_path / "sample.grib2"
+    grib_file.touch()
+    ds_mod = load_data("gefs_data", "gefs", {"files": str(grib_file)})
     ds_obs = load_data("openaq_data", "openaq", {"files": "dummy.json", "as_xarray": True})
 
     # Pair

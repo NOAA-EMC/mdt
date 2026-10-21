@@ -152,3 +152,21 @@ sequenceDiagram
 1. Subclass `mdt.engine_registry.Engine`.
 2. Implement the `execute()` method to translate the NetworkX DAG into the new orchestrator's native format.
 3. Register the new engine in `src/mdt/engine_registry.py`.
+
+## Reproducible development environment
+
+Activate the Conda environment described in the quick start, then run:
+
+```bash
+uv sync --active --frozen --all-extras --inexact
+uv run --active --frozen --all-extras --inexact ruff check src/ tests/
+uv run --active --frozen --all-extras --inexact mypy src/mdt
+uv run --active --frozen --all-extras --inexact pytest tests/
+```
+
+The four direct MONET Git dependencies use immutable revisions. When updating
+them, change the revision in `pyproject.toml`, run `uv lock`, and commit the
+manifest and lockfile together after testing. CI uses the same frozen lockfile.
+The lightweight lint job installs only the locked `lint` dependency group.
+
+See [Testing MDT](testing.md) for offline checks and explicit live integration opt-ins.

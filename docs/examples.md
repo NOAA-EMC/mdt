@@ -122,6 +122,15 @@ data:
     kwargs:
       dates: "2023-08-01"
       product: "aerosol"
+      filters:
+        typeOfFirstFixedSurface: 10
+    zarr_store:
+      enabled: true
+      backend: "icechunk"
+      icechunk_url: "s3://<your-bucket>/<your-gefs-icechunk-repo>"
+      max_scan_attempts: 5
+      network_timeout: 60.0
+      max_concurrent_requests: 16
 
   aeronet_obs:
     type: "aeronet"
@@ -145,9 +154,14 @@ statistics:
 plots:
   spatial_aod:
     input: "pair_gefs_aeronet"
-    type: "spatial"
+    type: "spatial_bias_scatter"
     kwargs:
       savename: "gefs_aeronet_spatial.png"
+      col1: "aod_550nm"
+      col2: "totAOD550"
+      fact: 0.2
+      vmin: -0.5
+      vmax: 0.5
 
   timeseries_aod:
     input: "pair_gefs_aeronet"
@@ -170,6 +184,15 @@ data:
     type: "gfs"
     kwargs:
       dates: "2023-08-01"
+      filters:
+        typeOfFirstFixedSurface: 103
+    zarr_store:
+      enabled: true
+      backend: "icechunk"
+      icechunk_url: "s3://<your-bucket>/<your-gfs-icechunk-repo>"
+      max_scan_attempts: 5
+      network_timeout: 60.0
+      max_concurrent_requests: 16
 
   ish_lite_obs:
     type: "ish_lite"

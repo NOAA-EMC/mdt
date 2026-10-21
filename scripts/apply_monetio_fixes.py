@@ -15,6 +15,7 @@ Fixes applied:
 
 import os
 import sys
+from collections.abc import Sequence
 
 # Determine the monetio source root
 if os.path.exists("monetio/readers/drivers.py"):
@@ -26,7 +27,7 @@ else:
     sys.exit(1)
 
 
-def patch_file(relpath, patches):
+def patch_file(relpath: str, patches: Sequence[tuple[str, str, str]]) -> None:
     """Apply string replacements to a file."""
     filepath = os.path.join(ROOT, relpath)
     with open(filepath) as f:
