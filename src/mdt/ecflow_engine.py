@@ -61,6 +61,9 @@ _DISPATCH_BLOCKS: dict[str, str] = {
         "        source_inputs = {name: load_artifact(data_dir, node_id) for name, node_id in source_inputs.items()}\n"
         "        if len(source_inputs) == 1:\n"
         "            source_inputs = next(iter(source_inputs.values()))\n"
+        "    else:\n"
+        "        source_inputs = load_artifact(data_dir, source_inputs)\n"
+        "    kwargs = {**kwargs, 'model_dim': model_dim}\n"
         "    result = pair_data(name=task_name, method=method,\n"
         "                       source_data=source_inputs, target_data=inputs['target'], kwargs=kwargs)"
     ),
@@ -131,6 +134,7 @@ def _build_wrapper_script(node_id: str, python_executable: str) -> str:  # noqa:
         "    plot_type = decode('%PLOT_TYPE_B64%')",
         "    method = decode('%METHOD_B64%')",
         "    dim = json.loads(decode('%DIM_B64%'))",
+        "    model_dim = decode('%MODEL_DIM_B64%')",
         "    force_weighted = decode('%FORCE_WEIGHTED_B64%') == 'true'",
         "    backend = decode('%BACKEND_B64%')",
         "    url = decode('%URL_B64%')",
@@ -363,6 +367,7 @@ class EcFlowEngine(Engine):
                 "PLOT_TYPE_B64": data.get("plot_type") or "",
                 "METHOD_B64": data.get("method") or "",
                 "DIM_B64": json.dumps(data.get("dim") or ""),
+                "MODEL_DIM_B64": data.get("model_dim", "model"),
                 "SOURCES_B64": json.dumps(data.get("sources") or []),
                 "FORCE_WEIGHTED_B64": str(data.get("force_weighted") or "").lower(),
                 "BACKEND_B64": data.get("backend") or "",

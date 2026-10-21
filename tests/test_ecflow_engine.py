@@ -703,7 +703,7 @@ class TestGenerateTaskWrappersScriptContent:
         script = _build_wrapper_script("stats_bias", engine.python_executable)
         assert "load_artifact(data_dir, upstream_id)" in script
         assert "save_artifact(data_dir, node_id, result)" in script
-        assert "source_data=inputs['source']" in script
+        assert "source_inputs = load_artifact(data_dir, source_inputs)" in script
         assert "input_data=inputs['input']" in script
         compile(re.sub(r"%[A-Z0-9_]+%", "safe", script), "wrapper.ecf", "exec")
         assert engine._input_node_ids("pair_obs_model", full_pipeline_dag.nodes["pair_obs_model"]) == {
@@ -955,3 +955,93 @@ class TestExecuteFlow:
 
         with pytest.raises(RuntimeError, match="localhost"):
             engine._load_and_start(MagicMock())
+
+
+@pytest.fixture
+def run_generated_wrapper(_tracking_ecflow, _make_config, tmp_path):
+    """Execute generated task code with ecFlow variable substitution and real artifacts."""
+    import re
+    from pathlib import Path
+
+    from mdt.ecflow_engine import EcFlowEngine
+
+    sys.modules["ecflow"].Client = MagicMock()
+    engines = {}
+
+    def run(dag, node_id):
+        if id(dag) not in engines:
+            engines[id(dag)] = EcFlowEngine(
+                dag, _make_config({"task_script_dir": str(tmp_path / "scripts"), "ecflow_data_dir": str(tmp_path / "data")})
+            )
+            # All wrappers in this simulated run share one artifact namespace.
+            engines[id(dag)].data_dir = tmp_path / "data"
+        engine = engines[id(dag)]
+        engine.build_suite()
+        paths = engine.generate_task_wrappers()
+        script_path = next(Path(path) for path in paths if Path(path).stem == node_id)
+        variables = dict(_tracking_ecflow["tasks"][node_id]._variables)
+        variables.update(ECF_NAME=f"/mdt/{node_id}", ECF_PASS="test", ECF_TRYNO="1")  # noqa: S106 — simulated ecFlow client
+        script = re.sub(r"%([A-Z0-9_]+)%", lambda match: str(variables[match[1]]), script_path.read_text())
+        client = sys.modules["ecflow"].Client.return_value
+        client.reset_mock()
+        exec(compile(script, str(script_path), "exec"), {})
+        client.child_complete.assert_called_once()
+        client.child_abort.assert_not_called()
+
+    return run
+
+
+@pytest.mark.parametrize("source_count", [1, 2])
+def test_generated_pipeline_loads_pairing_artifacts(run_generated_wrapper, tmp_path, mocker, source_count):
+    """Single and multi-model wrappers pass datasets through pairing into statistics."""
+    import xarray as xr
+
+    from mdt.ecflow_io import load_artifact
+
+    dag = nx.DiGraph()
+    sources = [f"model{i}" for i in range(source_count)]
+    for name in [*sources, "obs"]:
+        dag.add_node(f"load_{name}", task_type="load_data", name=name, dataset_type="example", kwargs={})
+    dag.add_node("pair_eval", task_type="pair_data", name="eval", source_names=sources, target_name="obs", model_dim="experiment", kwargs={})
+    dag.add_edges_from((f"load_{name}", "pair_eval") for name in [*sources, "obs"])
+    dag.add_node("stats_eval", task_type="compute_statistics", name="summary", metrics=["mb"], kwargs={})
+    dag.add_edge("pair_eval", "stats_eval")
+
+    def load(name, **kwargs):
+        return xr.Dataset({"value": ("x", [1.0, 3.0] if name == "obs" else [2.0, 5.0])})
+
+    def pair(source_data, target_data, kwargs, **other):
+        assert kwargs["model_dim"] == "experiment"
+        assert isinstance(target_data, xr.Dataset)
+        if source_count == 1:
+            assert isinstance(source_data, xr.Dataset)
+            model = source_data.value
+        else:
+            assert list(source_data) == sources
+            assert all(isinstance(value, xr.Dataset) for value in source_data.values())
+            model = xr.concat([value.value for value in source_data.values()], dim="experiment")
+        return xr.Dataset({"obs": target_data.value, "mod": model})
+
+    mocker.patch("mdt.tasks.data.load_data", side_effect=load)
+    mocker.patch("mdt.tasks.pairing.pair_data", side_effect=pair)
+    mocker.patch("mdt.tasks.statistics._find_metric", return_value=lambda obs, mod: (mod - obs).mean())
+    for node_id in nx.topological_sort(dag):
+        run_generated_wrapper(dag, node_id)
+    assert float(load_artifact(tmp_path / "data", "stats_eval")["mb"]) == 1.5
+
+
+def test_generated_pairing_aborts_for_missing_source(run_generated_wrapper, multi_node_dag, tmp_path, mocker):
+    """A missing source artifact aborts the child task with its upstream ID."""
+    import xarray as xr
+
+    from mdt.ecflow_io import save_artifact
+
+    save_artifact(tmp_path / "data", "load_aeronet", xr.Dataset({"obs": ("x", [1.0])}))
+    pair = mocker.patch("mdt.tasks.pairing.pair_data")
+    with pytest.raises(SystemExit) as exc:
+        run_generated_wrapper(multi_node_dag, "pair_merra2_aeronet")
+    assert exc.value.code == 1
+    client = sys.modules["ecflow"].Client.return_value
+    assert "load_merra2" in client.child_abort.call_args.args[0]
+    client.child_complete.assert_not_called()
+    pair.assert_not_called()
