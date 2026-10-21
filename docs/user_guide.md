@@ -30,3 +30,16 @@ MDT is built on **Prefect**, which provides a robust engine for task scheduling 
 *   **Dask (SLURM/PBS/LSF):** Scale out to multiple nodes on an HPC cluster.
 
 MDT's backend-agnostic design ensures that it can efficiently handle "big data" using **Dask** without requiring manual code changes.
+
+## Statistical weights
+
+When statistics specify `kwargs.weights`, MDT requires that weight variable to
+exist and that the selected MONET metric support weights. Unsupported weighting
+now raises an error instead of silently changing the calculation.
+
+For workflows that deliberately accept an unweighted result for unsupported
+metrics, set `kwargs.allow_unweighted_fallback: true`. MDT logs a warning and
+records the unweighted calculation in the result's history. Missing named weight
+variables still raise an error, even with fallback enabled. Existing workflows
+that relied on implicit fallback must choose a weighted metric or explicitly
+opt in to this behavior. MDT continues to delegate calculations to `monet-stats`.

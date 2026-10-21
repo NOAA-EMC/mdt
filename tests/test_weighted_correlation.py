@@ -5,9 +5,9 @@ import xarray as xr
 from mdt.tasks.statistics import compute_statistics
 
 
-def test_weighted_correlation_aero_protocol(mocker):
+def test_explicit_unweighted_correlation_fallback_aero_protocol(mocker):
     """
-    Aero Protocol Double-Check: Weighted Pearson Correlation.
+    Aero Protocol Double-Check: Explicit unweighted Pearson fallback.
 
     Ensures Eager (NumPy) and Lazy (Dask) backends yield identical results.
     """
@@ -40,7 +40,7 @@ def test_weighted_correlation_aero_protocol(mocker):
     # 3. Execution
     metrics = ["pearsonr"]
     # We pass 'w' as the weight variable
-    kwargs = {"obs_var": "obs", "mod_var": "mod", "weights": "w"}
+    kwargs = {"obs_var": "obs", "mod_var": "mod", "weights": "w", "allow_unweighted_fallback": True}
 
     # Note: We don't mock monet_stats here because we want to test the REAL integration
     # unless it's missing in the environment. Since I installed it, I'll use it.
@@ -58,6 +58,7 @@ def test_weighted_correlation_aero_protocol(mocker):
 
     # Verify provenance
     assert "Computed pearsonr" in res_eager.attrs["history"]
+    assert "computed unweighted" in res_eager.attrs["history"]
 
     print("\n✅ Weighted Correlation Double-Check Passed: Eager == Lazy (Dask)")
 

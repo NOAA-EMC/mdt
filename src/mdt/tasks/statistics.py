@@ -40,6 +40,9 @@ def compute_statistics(
     kwargs : Dict[str, Any]
         Additional keyword arguments passed to the monet_stats metric functions.
         Common keys: `obs_var`, `mod_var`, `weights`, `dim`.
+        Requested weights are required unless `allow_unweighted_fallback=True`
+        explicitly permits an unsupported metric to run unweighted. Missing
+        named weight variables always raise an error.
 
     Returns
     -------
@@ -254,9 +257,15 @@ def _execute_metric(
     mod_var = kwargs.get("mod_var", "mod")
     weights = kwargs.get("weights")
     dim = kwargs.get("dim")
+    allow_unweighted_fallback = kwargs.get("allow_unweighted_fallback", False)
+    if not isinstance(allow_unweighted_fallback, bool):
+        raise ValueError("allow_unweighted_fallback must be a boolean.")
 
     # Filter out MDT-specific keys for the standard metric call
-    call_kwargs = {k: v for k, v in kwargs.items() if k not in ["obs_var", "mod_var", "weights", "dim", "savename"]}
+    call_kwargs = {
+        k: v for k, v in kwargs.items()
+        if k not in ["obs_var", "mod_var", "weights", "dim", "savename", "allow_unweighted_fallback"]
+    }
 
     if isinstance(data, (xr.Dataset, xr.DataArray)):
         # 1. Extract Target Data
@@ -275,6 +284,8 @@ def _execute_metric(
                     w = data[weights]
                 elif isinstance(data, xr.DataArray) and weights in data.coords:
                     w = data.coords[weights]
+                else:
+                    raise ValueError(f"Requested weight variable '{weights}' was not found in the input data.")
             else:
                 w = weights
 
@@ -298,6 +309,7 @@ def _execute_metric(
             axis_param = None
 
         # 3. Weighted Logic (Aero Protocol + monet-stats backend)
+        fallback_message = None
         if w is not None:
             if has_weights:
                 # Direct call if metric supports weights natively
@@ -311,18 +323,28 @@ def _execute_metric(
             # Manual fallbacks have been removed to ensure scientific consistency
             # and to minimize maintenance overhead.
             metric_name = getattr(func, "__name__", "")
-            logger.warning(
-                "Metric '%s' does not support weights natively. Using unweighted.",
-                metric_name,
+            if not allow_unweighted_fallback:
+                raise ValueError(
+                    f"Metric '{metric_name}' does not support requested weights. "
+                    "Choose a weighted metric or explicitly set allow_unweighted_fallback: true."
+                )
+            fallback_message = (
+                f"Metric '{metric_name}' computed unweighted because it does not support requested weights; "
+                "allow_unweighted_fallback=True."
             )
+            logger.warning(fallback_message)
 
         # 4. Standard Fallback (Unweighted or natively supported axis)
         if axis_param:
             call_kwargs[axis_param] = axis
 
         if target_obs is not None:
-            return cast(Union[xr.Dataset, xr.DataArray], func(target_obs, target_mod, **call_kwargs))
-        return cast(Union[xr.Dataset, xr.DataArray], func(target_mod, **call_kwargs))
+            result = func(target_obs, target_mod, **call_kwargs)
+        else:
+            result = func(target_mod, **call_kwargs)
+        if fallback_message:
+            result = update_history(to_xarray(result), fallback_message)
+        return cast(Union[xr.Dataset, xr.DataArray], result)
 
     raise TypeError(f"Statistics require xarray input, got {type(data).__name__}.")
 
