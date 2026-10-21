@@ -1,6 +1,7 @@
 import logging
 import os
 import threading
+from collections.abc import Hashable
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, Iterator
@@ -192,7 +193,7 @@ def _reader_supports_virtualizarr(dataset_type: str) -> bool:
     return issubclass(reader_cls, GriddedReader)
 
 
-def _time_role(ds: xr.Dataset, configured: Any, standard_name: str, exclude: set[str] | None = None) -> str | None:
+def _time_role(ds: xr.Dataset, configured: Any, standard_name: str, exclude: set[Hashable] | None = None) -> Hashable | None:
     """Resolve one time coordinate from explicit policy or CF metadata."""
     candidates = [configured] if isinstance(configured, str) else list(configured or [])
     candidates.extend(name for name, var in ds.variables.items() if var.attrs.get("standard_name") == standard_name)
@@ -236,11 +237,9 @@ def _promote_time_coordinate(loaded_obj: xr.Dataset, name: str, policy: Dict[str
     ``forecast_reference_time`` and ``lead_time`` to variable names or ordered
     candidate-name lists. No reader-specific variable names are assumed.
     """
-    if not isinstance(loaded_obj, xr.Dataset):
-        return loaded_obj
     ds = loaded_obj
     policy = policy or {}
-    valid_name = _time_role(ds, policy.get("valid_time"), "time")
+    valid_name: Hashable | None = _time_role(ds, policy.get("valid_time"), "time")
     reference_name = _time_role(ds, policy.get("forecast_reference_time"), "forecast_reference_time", {valid_name} if valid_name else None)
     lead_name = _time_role(ds, policy.get("lead_time"), "forecast_period", {n for n in (valid_name, reference_name) if n})
 
@@ -305,9 +304,8 @@ def _promote_time_coordinate(loaded_obj: xr.Dataset, name: str, policy: Dict[str
         valid = ds["valid_time"]
 
     if valid.ndim == 0:
-        value = valid.values
-        value = pd.to_datetime(value) if np.asarray(value).dtype.kind in ("U", "S") else value
-        return ds.expand_dims(time=[value])
+        scalar_time = pd.to_datetime(valid.values) if np.asarray(valid.values).dtype.kind in ("U", "S") else valid.values
+        return ds.expand_dims(time=[scalar_time])
 
     forecast_dims = list(valid.dims)
     if forecast_dims != ["time"]:
@@ -378,12 +376,6 @@ def load_data(
 
     def _apply_subsets(loaded_obj: xr.Dataset | xr.DataArray) -> xr.Dataset | xr.DataArray:
         """Apply optional index-based (isel) or coordinate-based (sel) dimension slicing and generic post-processing."""
-        if dataset_type == "aeronet" and isinstance(loaded_obj, pd.DataFrame):
-            logger.info("Converting AERONET DataFrame '%s' to xarray Dataset.", name)
-            if loaded_obj.index.has_duplicates:
-                loaded_obj = loaded_obj.loc[~loaded_obj.index.duplicated(keep="first")]
-            loaded_obj = loaded_obj.to_xarray()
-
         if not isinstance(loaded_obj, xr.Dataset):
             return loaded_obj
 
@@ -443,20 +435,12 @@ def load_data(
                 loaded_obj["WSPD_10maboveground"].attrs["units"] = "m s-1"
                 logger.info("Dynamically calculated 'WSPD_10maboveground' from u_wind and v_wind for '%s'", name)
 
-        if isinstance(loaded_obj, xr.Dataset):
-            if len(loaded_obj.variables) == 0:
-                raise ValueError(
-                    f"Loaded dataset '{name}' is empty (contains 0 variables/dimensions). "
-                    f"This can happen if the requested date range has no matching files on the server, "
-                    f"or if filters excluded all variables."
-                )
-        elif isinstance(loaded_obj, pd.DataFrame):
-            if loaded_obj.empty:
-                raise ValueError(
-                    f"Loaded dataset '{name}' is empty (DataFrame contains 0 rows). "
-                    f"This can happen if the requested date range has no matching files on the server, "
-                    f"or if filters excluded all data."
-                )
+        if len(loaded_obj.variables) == 0:
+            raise ValueError(
+                f"Loaded dataset '{name}' is empty (contains 0 variables/dimensions). "
+                f"This can happen if the requested date range has no matching files on the server, "
+                f"or if filters excluded all variables."
+            )
 
         return loaded_obj
 

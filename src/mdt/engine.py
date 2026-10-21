@@ -18,6 +18,9 @@ from mdt.tasks.reductions import calculate_reduction
 from mdt.tasks.statistics import compute_statistics
 
 if TYPE_CHECKING:
+    from prefect.futures import PrefectFuture
+    from prefect.task_runners import TaskRunner
+
     from mdt.config import ConfigParser
 
 logger = logging.getLogger(__name__)
@@ -533,7 +536,10 @@ class PrefectEngine(Engine):
             # Single local worker — use ConcurrentTaskRunner (no Dask serialization overhead)
             from prefect.task_runners import ConcurrentTaskRunner
 
-            task_futures = mdt_flow.with_options(task_runner=ConcurrentTaskRunner())()
+            # Prefect's runner generic is invariant, although concurrent futures
+            # implement the PrefectFuture interface required by Flow.with_options.
+            runner = cast("TaskRunner[PrefectFuture[Any]]", ConcurrentTaskRunner())
+            task_futures = mdt_flow.with_options(task_runner=runner)()
 
         # Requirement: Ensure the CLI waits for task completion.
         # Prefect .submit() returns futures. We need to wait for them.

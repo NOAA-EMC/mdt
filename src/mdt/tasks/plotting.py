@@ -65,14 +65,12 @@ def _format_time_range(data: Union[xr.Dataset, xr.DataArray, Dict[str, Any]]) ->
     if times is None:
         return None
 
-    times = pd.Series(times).dropna()
-    if times.empty:
+    valid_times = pd.Series(times).dropna()
+    if valid_times.empty:
         return None
 
-    t0 = times.min()
-    t1 = times.max()
-    if pd.isna(t0) or pd.isna(t1):
-        return None
+    t0 = valid_times.min()
+    t1 = valid_times.max()
 
     fmt = "%Y-%m-%d"
     if t0 == t1:
@@ -135,11 +133,11 @@ def _compute_xarray_global_stat(data: xr.Dataset, col1: str, col2: str, stat_nam
     diff = b - a
     stat = stat_name.lower()
     if stat == "rmse":
-        result = np.sqrt((diff**2).mean(skipna=True))
+        result = (diff**2).mean(skipna=True) ** 0.5
     elif stat in ("mb", "bias", "mean_bias"):
         result = diff.mean(skipna=True)
     elif stat == "mae":
-        result = np.abs(diff).mean(skipna=True)
+        result = abs(diff).mean(skipna=True)
     elif stat in ("r", "corr", "correlation"):
         result = xr.corr(a, b)
     else:
@@ -283,6 +281,8 @@ def generate_plot(
     regions = kwargs.pop("regions", None)
 
     if regions:
+        if not isinstance(input_data, xr.Dataset):
+            raise ValueError("Region filtering requires an xarray Dataset.")
         savename_template = kwargs.get("savename", f"{name}.png")
         if "{region}" not in savename_template:
             raise ValueError(f"Plot '{name}': savename must contain '{{region}}' placeholder when regions are specified.")
@@ -629,7 +629,7 @@ def _generate_static_plot(
                         # Drop NaN so matplotlib connects valid points
                         mean_data = mean_data.dropna(x_dim)
                         if len(mean_data) > 0:
-                            mean_data.plot(ax=plot_obj.ax, **plot_kw)
+                            mean_data.plot.line(ax=plot_obj.ax, label=label, color=color)
 
             plot_obj.ax.legend()
             plot_obj.fig.tight_layout()

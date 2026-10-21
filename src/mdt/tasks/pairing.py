@@ -32,9 +32,6 @@ def _harmonize_spatial_coordinates(
     data: Union[xr.Dataset, xr.DataArray],
 ) -> Union[xr.Dataset, xr.DataArray]:
     """Normalize spatial coordinate aliases on paired xarray outputs."""
-    if not isinstance(data, (xr.Dataset, xr.DataArray)):
-        return data
-
     out: Union[xr.Dataset, xr.DataArray] = data
 
     has_lat_lon = "lat" in out.coords and "lon" in out.coords
@@ -66,32 +63,29 @@ def _drop_duplicate_time_entries(
     role: str,
 ) -> Union[xr.Dataset, xr.DataArray]:
     """Drop duplicate time entries that break xarray alignment during pairing."""
-    if isinstance(data, (xr.Dataset, xr.DataArray)):
-        # Never drop duplicate time entries for point observation datasets (non-gridded)
-        if "y" not in data.dims and "x" not in data.dims:
-            return data
-
-        if "time" in data.indexes:
-            time_index = data.indexes["time"]
-            dup_count = int(time_index.duplicated().sum())
-            if dup_count > 0:
-                if isinstance(data, xr.Dataset) and {"forecast_reference_time", "lead_time"}.issubset(data.coords):
-                    logger.info(
-                        "Dataset '%s' has %d repeated valid times from distinct forecast cycles/leads; preserving all forecast records.",
-                        name,
-                        dup_count,
-                    )
-                    return data
-                logger.warning(
-                    "Dataset '%s' %s contains %d duplicate time values; keeping first occurrence.",
-                    name,
-                    role,
-                    dup_count,
-                )
-                keep_mask = ~time_index.duplicated(keep="first")
-                return data.isel(time=keep_mask)
+    # Never drop duplicate time entries for point observation datasets (non-gridded)
+    if "y" not in data.dims and "x" not in data.dims:
         return data
 
+    if "time" in data.indexes:
+        time_index = data.indexes["time"]
+        dup_count = int(time_index.duplicated().sum())
+        if dup_count > 0:
+            if isinstance(data, xr.Dataset) and {"forecast_reference_time", "lead_time"}.issubset(data.coords):
+                logger.info(
+                    "Dataset '%s' has %d repeated valid times from distinct forecast cycles/leads; preserving all forecast records.",
+                    name,
+                    dup_count,
+                )
+                return data
+            logger.warning(
+                "Dataset '%s' %s contains %d duplicate time values; keeping first occurrence.",
+                name,
+                role,
+                dup_count,
+            )
+            keep_mask = ~time_index.duplicated(keep="first")
+            return data.isel(time=keep_mask)
     return data
 
 
@@ -179,8 +173,7 @@ def pair_data(
         if isinstance(target_data, xr.Dataset) and "mesh" in target_data:
             target_data = target_data.drop_vars("mesh")
 
-        source_xr = cast(Union[xr.Dataset, xr.DataArray], source_data)
-        source_xr = cast(Union[xr.Dataset, xr.DataArray], _drop_duplicate_time_entries(source_xr, name, "source"))
+        source_xr = _drop_duplicate_time_entries(source_data, name, "source")
         target_data = _drop_duplicate_time_entries(target_data, name, "target")
 
         # Use the unified monet.pair interface
@@ -253,29 +246,19 @@ def combine_paired_data(
         raise ValueError("No paired data provided for combination.")
 
     paired_data = {name: to_xarray(data) for name, data in paired_data.items()}
-    first_key = next(iter(paired_data))
-    first_item = paired_data[first_key]
-
+    names = pd.Index(list(paired_data), name=dim)
     logger.info(f"Combining {len(paired_data)} paired datasets along dimension '{dim}'")
 
-    if isinstance(first_item, (xr.Dataset, xr.DataArray)):
-        datasets = []
-        names = []
-        for name, ds in paired_data.items():
-            if not isinstance(ds, (xr.Dataset, xr.DataArray)):
-                raise TypeError(f"All items must be xarray. Found {type(ds)}")
-
-            datasets.append(ds)
-            names.append(name)
-
-        # Combine using xarray concatenation along a new dimension
-        try:
-            # Create the dimension coordinate
-            combined_xr = xr.concat(datasets, dim=pd.Index(names, name=dim))
-            return cast(Union[xr.Dataset, xr.DataArray], combined_xr)
-        except Exception as e:
-            logger.error(f"Failed to combine xarray objects: {e}")
-            raise
-
-    else:
-        raise TypeError(f"Unsupported data type for combination: {type(first_item)}")
+    # Xarray concatenation requires homogeneous Dataset or DataArray inputs.
+    # Separate the types so both runtime validation and overload selection agree.
+    datasets = [data for data in paired_data.values() if isinstance(data, xr.Dataset)]
+    arrays = [data for data in paired_data.values() if isinstance(data, xr.DataArray)]
+    if datasets and arrays:
+        raise TypeError("All paired items must have the same xarray type (Dataset or DataArray).")
+    try:
+        if datasets:
+            return xr.concat(datasets, dim=names)
+        return xr.concat(arrays, dim=names)
+    except Exception as e:
+        logger.error(f"Failed to combine xarray objects: {e}")
+        raise

@@ -84,6 +84,8 @@ def compute_statistics(
         return results
 
     if regions:
+        if not isinstance(input_data, xr.Dataset):
+            raise ValueError("Region filtering requires an xarray Dataset.")
         savename_template = kwargs.get("savename", "")
         if "{region}" not in savename_template:
             raise ValueError(f"Statistics '{name}': savename must contain '{{region}}' placeholder when regions are specified.")
@@ -97,8 +99,8 @@ def compute_statistics(
             region_savename = savename_template.replace("{region}", region.replace(" ", "_"))
             region_kwargs = {**kwargs, "savename": region_savename}
             region_kwargs.pop("regions", None)
-            results = _compute_single(name, metrics, filtered, region_kwargs)
-            all_results[region] = results
+            region_results = _compute_single(name, metrics, filtered, region_kwargs)
+            all_results[region] = region_results
         return all_results
     else:
         return _compute_single(name, metrics, input_data, kwargs)
