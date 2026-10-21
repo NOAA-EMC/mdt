@@ -36,6 +36,10 @@ def _find_region_variable(data: xr.Dataset) -> str:
 def _filter_by_region(data: xr.Dataset, region_var: str, region_name: str) -> xr.Dataset:
     """Filter dataset to only points matching the given region."""
     mask = data[region_var] == region_name
+    # Xarray needs a concrete indexer for drop=True. Materialize only the
+    # region labels, keeping the scientific variables lazy after artifact reload.
+    if mask.chunks is not None:
+        mask = mask.compute()
     return data.where(mask, drop=True)
 
 

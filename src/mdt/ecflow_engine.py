@@ -65,7 +65,7 @@ _DISPATCH_BLOCKS: dict[str, str] = {
         "        source_inputs = load_artifact(data_dir, source_inputs)\n"
         "    kwargs = {**kwargs, 'model_dim': model_dim}\n"
         "    result = pair_data(name=task_name, method=method,\n"
-        "                       source_data=source_inputs, target_data=inputs['target'], kwargs=kwargs)"
+        "                       source_data=source_inputs, target_data=inputs['target'], kwargs=kwargs, mask=mask)"
     ),
     "combine_paired_data": (
         "    from mdt.tasks.pairing import combine_paired_data\n"
@@ -135,6 +135,7 @@ def _build_wrapper_script(node_id: str, python_executable: str) -> str:  # noqa:
         "    method = decode('%METHOD_B64%')",
         "    dim = json.loads(decode('%DIM_B64%'))",
         "    model_dim = decode('%MODEL_DIM_B64%')",
+        "    mask = json.loads(decode('%MASK_B64%'))",
         "    force_weighted = decode('%FORCE_WEIGHTED_B64%') == 'true'",
         "    backend = decode('%BACKEND_B64%')",
         "    url = decode('%URL_B64%')",
@@ -368,6 +369,7 @@ class EcFlowEngine(Engine):
                 "METHOD_B64": data.get("method") or "",
                 "DIM_B64": json.dumps(data.get("dim") or ""),
                 "MODEL_DIM_B64": data.get("model_dim", "model"),
+                "MASK_B64": json.dumps(data.get("mask")),
                 "SOURCES_B64": json.dumps(data.get("sources") or []),
                 "FORCE_WEIGHTED_B64": str(data.get("force_weighted") or "").lower(),
                 "BACKEND_B64": data.get("backend") or "",

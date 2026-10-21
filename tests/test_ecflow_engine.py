@@ -992,7 +992,8 @@ def run_generated_wrapper(_tracking_ecflow, _make_config, tmp_path):
 
 
 @pytest.mark.parametrize("source_count", [1, 2])
-def test_generated_pipeline_loads_pairing_artifacts(run_generated_wrapper, tmp_path, mocker, source_count):
+@pytest.mark.parametrize("mask", [None, "land"])
+def test_generated_pipeline_loads_pairing_artifacts(run_generated_wrapper, tmp_path, mocker, source_count, mask):
     """Single and multi-model wrappers pass datasets through pairing into statistics."""
     import xarray as xr
 
@@ -1002,9 +1003,12 @@ def test_generated_pipeline_loads_pairing_artifacts(run_generated_wrapper, tmp_p
     sources = [f"model{i}" for i in range(source_count)]
     for name in [*sources, "obs"]:
         dag.add_node(f"load_{name}", task_type="load_data", name=name, dataset_type="example", kwargs={})
-    dag.add_node("pair_eval", task_type="pair_data", name="eval", source_names=sources, target_name="obs", model_dim="experiment", kwargs={})
+    dag.add_node(
+        "pair_eval", task_type="pair_data", name="eval", source_names=sources, target_name="obs", model_dim="experiment", mask=mask, kwargs={}
+    )
     dag.add_edges_from((f"load_{name}", "pair_eval") for name in [*sources, "obs"])
-    dag.add_node("stats_eval", task_type="compute_statistics", name="summary", metrics=["mb"], kwargs={})
+    stats_kwargs = {"regions": ["North"], "savename": str(tmp_path / "stats_{region}.csv")} if mask else {}
+    dag.add_node("stats_eval", task_type="compute_statistics", name="summary", metrics=["mb"], kwargs=stats_kwargs)
     dag.add_edge("pair_eval", "stats_eval")
 
     def load(name, **kwargs):
@@ -1012,6 +1016,7 @@ def test_generated_pipeline_loads_pairing_artifacts(run_generated_wrapper, tmp_p
 
     def pair(source_data, target_data, kwargs, **other):
         assert kwargs["model_dim"] == "experiment"
+        assert other["mask"] == mask
         assert isinstance(target_data, xr.Dataset)
         if source_count == 1:
             assert isinstance(source_data, xr.Dataset)
@@ -1020,14 +1025,16 @@ def test_generated_pipeline_loads_pairing_artifacts(run_generated_wrapper, tmp_p
             assert list(source_data) == sources
             assert all(isinstance(value, xr.Dataset) for value in source_data.values())
             model = xr.concat([value.value for value in source_data.values()], dim="experiment")
-        return xr.Dataset({"obs": target_data.value, "mod": model})
+        paired = xr.Dataset({"obs": target_data.value, "mod": model})
+        return paired.assign(land=("x", ["North", "South"])) if mask else paired
 
     mocker.patch("mdt.tasks.data.load_data", side_effect=load)
     mocker.patch("mdt.tasks.pairing.pair_data", side_effect=pair)
     mocker.patch("mdt.tasks.statistics._find_metric", return_value=lambda obs, mod: (mod - obs).mean())
     for node_id in nx.topological_sort(dag):
         run_generated_wrapper(dag, node_id)
-    assert float(load_artifact(tmp_path / "data", "stats_eval")["mb"]) == 1.5
+    result = load_artifact(tmp_path / "data", "stats_eval")
+    assert float(result["North"]["mb"] if mask else result["mb"]) == (1.0 if mask else 1.5)
 
 
 def test_generated_pairing_aborts_for_missing_source(run_generated_wrapper, multi_node_dag, tmp_path, mocker):

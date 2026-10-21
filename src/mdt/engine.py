@@ -72,13 +72,13 @@ def prefect_load_data(name: str, dataset_type: str, kwargs: Dict[str, Any]) -> A
     return load_data(name, dataset_type, kwargs)
 
 
-def prefect_pair_data(name: str, method: str, source_data: Any, target_data: Any, kwargs: Dict[str, Any]) -> Any:
+def prefect_pair_data(name: str, method: str, source_data: Any, target_data: Any, kwargs: Dict[str, Any], mask: str | None = None) -> Any:
     """Prefect task wrapper for pair_data."""
     from prefect import get_run_logger
 
     logger = get_run_logger()
     logger.info(f"Pairing data: {name} using {method}")
-    return pair_data(name, method, source_data, target_data, kwargs)
+    return pair_data(name, method, source_data, target_data, kwargs, mask=mask)
 
 
 def prefect_combine_paired_data(paired_data: Dict[str, Any], dim: str = "model") -> Any:
@@ -426,6 +426,7 @@ class PrefectEngine(Engine):
                                 source_data=_resolve_output(source_output),
                                 target_data=_resolve_output(target_output),
                                 kwargs={**node_data["kwargs"], "model_dim": node_data.get("model_dim", "model")},
+                                mask=node_data.get("mask"),
                             )
                             task_outputs[node_id] = pair_result
                             last_pair_future = pair_result
@@ -436,6 +437,7 @@ class PrefectEngine(Engine):
                                 source_data=source_output,
                                 target_data=target_output,
                                 kwargs={**node_data["kwargs"], "model_dim": node_data.get("model_dim", "model")},
+                                mask=node_data.get("mask"),
                             )
                             task_outputs[node_id] = future
 
