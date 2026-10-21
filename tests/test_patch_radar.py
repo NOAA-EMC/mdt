@@ -13,12 +13,14 @@ import sys
 import numpy as np
 import pytest
 
-# Import compute_radar_metrics from the patched monet_plots installation
-from monet_plots.plots.radar import compute_radar_metrics
-
 # Import patch utilities from the scripts directory
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 from patch_radar import RADAR_SOURCE, is_already_patched
+
+# Test the source this script emits without overwriting an installed dependency.
+_patch_namespace = {"__name__": "monet_plots.plots._mdt_patch_test", "__package__": "monet_plots.plots"}
+exec(compile(RADAR_SOURCE, "<radar_patch>", "exec"), _patch_namespace)
+compute_radar_metrics = _patch_namespace["compute_radar_metrics"]
 
 # ---------------------------------------------------------------------------
 # Test IOA, KGE, CCC computed correctly for known inputs (Req 8.1, 8.2, 8.3)

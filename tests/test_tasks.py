@@ -9,6 +9,22 @@ from mdt.tasks.pairing import pair_data
 from mdt.tasks.statistics import compute_statistics
 
 
+class UnsupportedOptionError(TypeError):
+    """Reader error protocol supported by MDT, independent of MonetIO version."""
+
+    def __init__(self, option, source):
+        self.option = option
+        super().__init__(f"Reader '{source}' does not support option '{option}'")
+
+
+@pytest.fixture
+def local_grib_file(tmp_path):
+    """An existing input path for tests that replace the actual reader."""
+    path = tmp_path / "sample.grib2"
+    path.touch()
+    return path
+
+
 @pytest.fixture(autouse=True)
 def _mock_esmf_manager(mocker):
     """Keep unit tests independent of process-global ESMF initialization."""
@@ -43,13 +59,11 @@ def test_load_data_gridded_reader_omits_as_xarray(mocker):
 
 def test_load_data_retries_without_as_xarray_when_reader_rejects(mocker):
     """A reader that rejects as_xarray is retried once without the option instead of failing."""
-    from monetio.readers.errors import OptionUnsupportedError
-
     ds = xr.Dataset({"val": (("x"), [1, 2, 3])})
 
     def fake_load(source, **kwargs):
         if kwargs.get("as_xarray"):
-            raise OptionUnsupportedError("as_xarray", source)
+            raise UnsupportedOptionError("as_xarray", source)
         return ds
 
     mock_load = mocker.patch("monetio.load", side_effect=fake_load)
@@ -95,15 +109,13 @@ def test_load_data_icap_date_alias_to_dates(mocker):
 
 def test_load_data_point_reader_ignores_virtualizarr_ingestion(mocker):
     """A tabular reader with a configured zarr_store must not be routed through VirtualiZarr ingestion."""
-    from monetio.readers.errors import OptionUnsupportedError
-
     ds = xr.Dataset({"val": (("x"), [1, 2, 3])})
 
     def fake_load(source, **kwargs):
         # Mirror monetio's real behavior: a point reader rejects virtualization options.
         for option in ("use_virtualizarr", "use_icechunk", "icechunk_url"):
             if kwargs.get(option):
-                raise OptionUnsupportedError(option, source)
+                raise UnsupportedOptionError(option, source)
         return ds
 
     mock_load = mocker.patch("monetio.load", side_effect=fake_load)
@@ -122,35 +134,33 @@ def test_load_data_point_reader_ignores_virtualizarr_ingestion(mocker):
     assert "icechunk_url" not in sent
 
 
-def test_load_data_gridded_reader_keeps_virtualizarr_ingestion(mocker):
+def test_load_data_gridded_reader_keeps_virtualizarr_ingestion(mocker, local_grib_file):
     """Gridded readers still receive VirtualiZarr ingestion options unchanged."""
     ds = xr.Dataset({"val": (("x"), [1, 2, 3])})
     mock_load = mocker.patch("monetio.load", return_value=ds)
 
-    load_data("gefs_model", "gefs", {"files": "dummy.grib2", "use_icechunk": True, "icechunk_url": "./ice"})
+    load_data("gefs_model", "gefs", {"files": str(local_grib_file), "use_icechunk": True, "icechunk_url": "./ice"})
 
     sent = mock_load.call_args.kwargs
     assert sent.get("use_icechunk") is True
 
 
-def test_load_data_retries_without_backend_rejected_option(mocker):
+def test_load_data_retries_without_backend_rejected_option(mocker, local_grib_file):
     """A reader-namespace option that leaks to the storage backend is dropped and the load retried.
 
     Reproduces the local-GRIB2 case where ``product`` is not consumed by the
     grib2io backend and raises ``TypeError: ... unexpected keyword argument 'product'``.
     """
-    from monetio.readers.errors import OptionUnsupportedError
-
     ds = xr.Dataset({"val": (("x"), [1, 2, 3])})
 
     def fake_load(source, **kwargs):
         if "product" in kwargs:
-            raise OptionUnsupportedError("product", source)
+            raise UnsupportedOptionError("product", source)
         return ds
 
     mock_load = mocker.patch("monetio.load", side_effect=fake_load)
 
-    res = load_data("gcafs_model", "ncep_grib", {"files": "/data/gefs.*/12/chem/*.grib2", "product": "pgrb2ap5"})
+    res = load_data("gcafs_model", "ncep_grib", {"files": str(local_grib_file), "product": "pgrb2ap5"})
 
     assert "Loaded dataset 'gcafs_model'" in res.attrs["history"]
     assert mock_load.call_count == 2
@@ -158,22 +168,21 @@ def test_load_data_retries_without_backend_rejected_option(mocker):
     assert "product" not in mock_load.call_args_list[1].kwargs
 
 
-def test_load_data_reraises_when_rejected_option_not_in_kwargs(mocker):
+def test_load_data_reraises_when_rejected_option_not_in_kwargs(mocker, local_grib_file):
     """If the backend rejects an option MDT never sent, the error is not masked."""
-    from monetio.readers.errors import OptionUnsupportedError
 
     def fake_load(source, **kwargs):
-        raise OptionUnsupportedError("something_else", source)
+        raise UnsupportedOptionError("something_else", source)
 
     mock_load = mocker.patch("monetio.load", side_effect=fake_load)
 
-    with pytest.raises(OptionUnsupportedError):
-        load_data("ds", "ncep_grib", {"files": "/data/*.grib2"})
+    with pytest.raises(UnsupportedOptionError):
+        load_data("ds", "ncep_grib", {"files": str(local_grib_file)})
 
     assert mock_load.call_count == 1
 
 
-def test_load_data_promotes_inband_valid_time_variable(mocker):
+def test_load_data_promotes_inband_valid_time_variable(mocker, local_grib_file):
     """Concatenated GRIB2 keeps a 'time' dimension unindexed; its own valid_time field must become the coordinate.
 
     Reproduces the local-file case where the archive carries the cycle times as
@@ -189,15 +198,15 @@ def test_load_data_promotes_inband_valid_time_variable(mocker):
     assert "time" not in ds.coords  # dimension only -- the GRIB2 concat shape
     mocker.patch("monetio.load", return_value=ds)
 
-    res = load_data("gcafs_model", "ncep_grib", {"files": "/data/gefs.*/12/chem/*.grib2"})
+    res = load_data("gcafs_model", "ncep_grib", {"files": str(local_grib_file), "time_axis": {"valid_time": "valid_time"}})
 
     assert "time" in res.coords
     assert res.coords["time"].ndim == 1
     np.testing.assert_array_equal(res["time"].values, times.values)
-    assert "valid_time" not in res.variables
+    np.testing.assert_array_equal(res["valid_time"].values, times.values)
 
 
-def test_load_data_promotes_reference_time_variable(mocker):
+def test_load_data_promotes_reference_time_variable(mocker, local_grib_file):
     """When valid_time is absent, the GRIB2 reference_time field names the cycles."""
     times = pd.date_range("2025-08-01", periods=4, freq="3h")
     ds = xr.Dataset(
@@ -208,13 +217,13 @@ def test_load_data_promotes_reference_time_variable(mocker):
     )
     mocker.patch("monetio.load", return_value=ds)
 
-    res = load_data("gcafs_model", "ncep_grib", {"files": "/data/*.grib2"})
+    res = load_data("gcafs_model", "ncep_grib", {"files": str(local_grib_file), "time_axis": {"valid_time": "reference_time"}})
 
     np.testing.assert_array_equal(res["time"].values, times.values)
 
 
-def test_load_data_reconstructs_time_from_dates_when_no_usable_time_variable(mocker):
-    """Numeric time fields are forecast hours, not labels, so the ``dates`` fallback still applies."""
+def test_load_data_keeps_unidentified_numeric_time_unchanged(mocker):
+    """Undeclared numeric fields must not become invented absolute time coordinates."""
     ds = xr.Dataset(
         {
             "val": (("time", "x"), np.arange(6, dtype="float64").reshape(3, 2)),
@@ -225,15 +234,11 @@ def test_load_data_reconstructs_time_from_dates_when_no_usable_time_variable(moc
 
     res = load_data("gefs_model", "gefs", {"dates": "2025-08-01", "lead_time": [0, 3, 6]})
 
-    assert "time" in res.coords
-    assert res["time"].dt.strftime("%Y-%m-%d %H").values.tolist() == [
-        "2025-08-01 00",
-        "2025-08-01 03",
-        "2025-08-01 06",
-    ]
+    assert "time" not in res.coords
+    np.testing.assert_array_equal(res["valid_time"].values, [0.0, 3.0, 6.0])
 
 
-def test_load_data_keeps_existing_time_coordinate(mocker):
+def test_load_data_keeps_existing_time_coordinate(mocker, local_grib_file):
     """A dataset that already carries a proper time index is left untouched."""
     times = pd.date_range("2025-08-01", periods=4, freq="3h")
     ds = xr.Dataset(
@@ -242,7 +247,7 @@ def test_load_data_keeps_existing_time_coordinate(mocker):
     )
     mocker.patch("monetio.load", return_value=ds)
 
-    res = load_data("model", "gefs", {"files": "/data/*.grib2"})
+    res = load_data("model", "gefs", {"files": str(local_grib_file)})
 
     assert res.coords["time"].equals(ds.coords["time"])
 

@@ -138,7 +138,7 @@ def test_loader_applies_isel_once_and_coordinate_sel_after_time_reconstruction(m
     result = load_data("sample", "gefs", {"isel": {"time": slice(1, 4)}})
     assert result.value.values.tolist() == [1, 2, 3]
 
-    timed_dataset = xr.Dataset({"value": ("time", [10, 20, 30])})
+    timed_dataset = xr.Dataset({"value": ("time", [10, 20, 30]), "valid_time": ("time", pd.date_range("2023-08-01", periods=3, freq="6h"))})
     mock_monetio.load.return_value = timed_dataset
     result = load_data(
         "sample",
@@ -146,6 +146,7 @@ def test_loader_applies_isel_once_and_coordinate_sel_after_time_reconstruction(m
         {
             "dates": "2023-08-01",
             "lead_time": [0, 6, 12],
+            "time_axis": {"valid_time": "valid_time"},
             "sel": {"time": pd.Timestamp("2023-08-01 06:00")},
         },
     )

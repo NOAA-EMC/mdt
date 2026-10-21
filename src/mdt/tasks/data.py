@@ -102,6 +102,29 @@ def _unsupported_option_name(error: BaseException) -> str | None:
     return None
 
 
+def _resolve_reader_class(dataset_type: str) -> Any:
+    """Resolve reader classes across modern and registry-based MonetIO versions."""
+    import importlib
+
+    import monetio
+    from monetio.readers.base import READER_REGISTRY
+
+    name = dataset_type
+    try:
+        from monetio._lazy import import_reader
+        from monetio._manifest import resolve
+    except ImportError:
+        modules = getattr(monetio, "_READER_MODULES", {})
+        module = modules.get(name) if isinstance(modules, dict) else None
+        if name not in READER_REGISTRY and module:
+            importlib.import_module(module, "monetio")
+    else:
+        spec = resolve(dataset_type)
+        name = spec.name
+        import_reader(dataset_type)
+    return READER_REGISTRY.get(name) or READER_REGISTRY.get(dataset_type)
+
+
 def _reader_accepts_as_xarray(dataset_type: str) -> bool:
     """Return True when the monetio reader for ``dataset_type`` declares ``as_xarray``.
 
@@ -116,13 +139,7 @@ def _reader_accepts_as_xarray(dataset_type: str) -> bool:
     import inspect
 
     try:
-        from monetio._lazy import import_reader
-        from monetio._manifest import resolve
-        from monetio.readers.base import READER_REGISTRY
-
-        spec = resolve(dataset_type)
-        import_reader(dataset_type)
-        reader_cls = READER_REGISTRY.get(spec.name) or READER_REGISTRY.get(dataset_type)
+        reader_cls = _resolve_reader_class(dataset_type)
     except Exception:
         logger.debug("Could not resolve reader for '%s'; assuming as_xarray is accepted.", dataset_type)
         return True
@@ -173,13 +190,9 @@ def _reader_supports_virtualizarr(dataset_type: str) -> bool:
     (assume ingestion is supported).
     """
     try:
-        from monetio._lazy import import_reader
-        from monetio._manifest import resolve
-        from monetio.readers.base import READER_REGISTRY, GriddedReader
+        from monetio.readers.base import GriddedReader
 
-        spec = resolve(dataset_type)
-        import_reader(dataset_type)
-        reader_cls = READER_REGISTRY.get(spec.name) or READER_REGISTRY.get(dataset_type)
+        reader_cls = _resolve_reader_class(dataset_type)
     except Exception:
         logger.debug("Could not resolve reader for '%s'; assuming VirtualiZarr is supported.", dataset_type)
         return True
@@ -408,16 +421,16 @@ def load_data(
                 loaded_obj = loaded_obj.isel(valid_isel)
                 logger.info("Applied isel subsetting on '%s': %s", name, valid_isel)
 
+        # Positional selection happens once in source layout; coordinate selection
+        # uses the normalized time index declared by CF metadata or time_axis.
+        loaded_obj = _promote_time_coordinate(loaded_obj, name, time_axis_policy)
+
         if sel_dict is not None:
             # Safely filter dictionary keys to those actually present in the dataset coordinates/dimensions
             valid_sel = {k: v for k, v in sel_dict.items() if k in loaded_obj.coords or k in loaded_obj.dims}
             if valid_sel:
                 loaded_obj = loaded_obj.sel(valid_sel)
                 logger.info("Applied sel subsetting on '%s': %s", name, valid_sel)
-
-        # Apply cycle/lead selection in the source layout, then normalize the
-        # remaining records to valid-time samples for MDT pairing.
-        loaded_obj = _promote_time_coordinate(loaded_obj, name, time_axis_policy)
 
         # Dynamically calculate wind speed if U and V wind components are present
         import numpy as np
@@ -868,8 +881,12 @@ def save_data(
     # Clear variable and coordinate encodings to prevent write failures
     # from decode-only backend codecs (such as grib2io/Grib2SerializerCodec) when writing to Zarr.
     data = data.copy(deep=False)
-    for var in list(data.variables):
-        data[var].encoding = {}
+    if isinstance(data, xr.Dataset):
+        for var in data.variables:
+            data[var].encoding = {}
+    else:
+        for coord in data.coords:
+            data[coord].encoding = {}
     data.encoding = {}
 
     import pathlib

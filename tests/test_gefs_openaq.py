@@ -9,8 +9,9 @@ from mdt.tasks.pairing import pair_data
 from mdt.tasks.statistics import compute_statistics
 
 
-def test_gefs_openaq_workflow(mocker):
+def test_gefs_openaq_workflow(mocker, tmp_path):
     """Test GEFS-Aerosol model paired with OpenAQ observations."""
+    mocker.patch("mdt.tasks.pairing._ensure_esmf_manager")
     # 1. Setup Mock Data
     times = pd.date_range("2023-01-01", periods=2, freq="h")
     lats = np.linspace(30, 50, 5)
@@ -37,7 +38,9 @@ def test_gefs_openaq_workflow(mocker):
     mocker.patch("monetio.load", side_effect=mock_load)
 
     # 3. Execution
-    ds_mod = load_data("gefs_data", "gefs", {"files": "dummy.nc"})
+    grib_file = tmp_path / "sample.grib2"
+    grib_file.touch()
+    ds_mod = load_data("gefs_data", "gefs", {"files": str(grib_file)})
     ds_obs = load_data("openaq_data", "openaq", {"files": "dummy.json", "as_xarray": True})
 
     # Pair

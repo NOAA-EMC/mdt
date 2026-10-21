@@ -279,28 +279,13 @@ class TestDAGRegionsPreservationProperty:
 # Feature: region-masking, Property 7: Radar metrics are within defined mathematical bounds
 # ---------------------------------------------------------------------------
 
-import os
-import sys
-
 import numpy as np
 
-# Add the scripts directory to path so we can import the compute_radar_metrics function
-# from the patch source directly (the function is defined in the RADAR_SOURCE string
-# within patch_radar.py, but we import it from the installed monet_plots if available,
-# or fall back to extracting it from the patch script).
-try:
-    from monet_plots.plots.radar import compute_radar_metrics
-except ImportError:
-    # If monet_plots.plots.radar is not available (patch not yet applied),
-    # import directly from the patch script's module-level function definition.
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
-    # The patch script embeds the source as a string; we need to exec it to get the function.
-    import patch_radar as _patch_radar_mod
+from scripts.patch_radar import RADAR_SOURCE
 
-    # Extract compute_radar_metrics from the RADAR_SOURCE string
-    _ns = {}
-    exec(compile(_patch_radar_mod.RADAR_SOURCE, "<radar_source>", "exec"), _ns)
-    compute_radar_metrics = _ns["compute_radar_metrics"]
+_radar_namespace = {"__name__": "monet_plots.plots._mdt_patch_property", "__package__": "monet_plots.plots"}
+exec(compile(RADAR_SOURCE, "<radar_patch>", "exec"), _radar_namespace)
+compute_radar_metrics = _radar_namespace["compute_radar_metrics"]
 
 
 # Strategy for generating numeric arrays suitable for radar metrics testing:
