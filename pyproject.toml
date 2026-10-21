@@ -70,6 +70,12 @@ patch_tags = ["fix", "perf"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+markers = [
+    "network: downloads real data or calls external services (requires --run-network)",
+    "ecflow: requires real ecFlow Python bindings and server (requires --run-ecflow)",
+    "hpc: requires a configured HPC scheduler (requires --run-hpc)",
+    "slow: long-running integration or data download test",
+]
 
 [tool.ruff]
 line-length = 148

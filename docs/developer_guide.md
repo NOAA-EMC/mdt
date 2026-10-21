@@ -168,3 +168,5 @@ The four direct MONET Git dependencies use immutable revisions. When updating
 them, change the revision in `pyproject.toml`, run `uv lock`, and commit the
 manifest and lockfile together after testing. CI uses the same frozen lockfile.
 The lightweight lint job installs only the locked `lint` dependency group.
+
+See [Testing MDT](testing.md) for offline checks and explicit live integration opt-ins.

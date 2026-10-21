@@ -22,12 +22,6 @@ from mdt.ecflow_engine import EcFlowEngine
 from mdt.engine import PrefectEngine
 
 
-def pytest_configure(config):
-    """Register custom markers to avoid unknown-marker warnings."""
-    config.addinivalue_line("markers", "network: marks tests requiring network access")
-    config.addinivalue_line("markers", "slow: marks tests that are slow due to data downloads")
-
-
 def _find_free_port() -> int:
     """Find a free TCP port on localhost in the registered port range (1024-49151).
 
@@ -65,7 +59,7 @@ def ish_lite_data():
     """Load real ISH-Lite data for 2023-08-01 via monetio (cached for session)."""
     import monetio
 
-    return monetio.load("ish_lite", dates="2023-08-01")
+    return monetio.load("ish_lite", dates="2023-08-01", as_xarray=True)
 
 
 @pytest.fixture(scope="session")
@@ -89,7 +83,7 @@ def ecflow_server(tmp_path_factory):
     Yields a dict with 'host', 'port', 'ecf_home', and 'process' keys.
     Shuts down the server on teardown.
     """
-    import ecflow
+    ecflow = pytest.importorskip("ecflow", reason="Install ecFlow Python bindings for --run-ecflow")
 
     port = _find_free_port()
     ecf_home = str(tmp_path_factory.mktemp("ecflow_home"))
@@ -139,6 +133,7 @@ def ecflow_server(tmp_path_factory):
         proc.wait(timeout=5)
 
 
+@pytest.mark.ecflow
 class TestEcFlowE2E:
     """End-to-end tests for ecFlow engine suite generation and server interaction."""
 
@@ -814,6 +809,7 @@ class TestCLIIntegration:
             f"stderr: {result.stderr[-2000:] if result.stderr else ''}"
         )
 
+    @pytest.mark.ecflow
     def test_ecflow_run_exits_zero(self, ecflow_server, tmp_path):
         """Running `mdt run <config> --orchestrator ecflow` with a real local ecFlow
         server exits with code 0.

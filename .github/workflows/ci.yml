@@ -29,8 +29,7 @@ jobs:
           environment-name: mdt
           create-args: >-
             python=3.12
-            ecflow
-            esmpy
+            c-compiler
           condarc: |
             channels:
               - conda-forge
@@ -63,8 +62,7 @@ jobs:
           environment-name: mdt
           create-args: >-
             python=${{ matrix.python-version }}
-            ecflow
-            esmpy
+            c-compiler
           condarc: |
             channels:
               - conda-forge
@@ -74,7 +72,7 @@ jobs:
         run: |
           uv sync --active --frozen --all-extras --inexact
 
-      - name: Test
+      - name: Offline tests
         shell: bash -el {0}
         run: |
           uv run --active --frozen --all-extras --inexact pytest tests/ -v --tb=short --cov=src/mdt --cov-report=xml
