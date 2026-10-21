@@ -144,10 +144,11 @@ def pair_data(
     ...     "my_pairing", "bilinear", model_ds, obs_df, {"interp_time": True}, mask="land"
     ... )
     """
+    kwargs = dict(kwargs)
+    dim = kwargs.pop("model_dim", "model")
     if isinstance(source_data, dict):
         if not source_data:
             raise ValueError("Multi-model pairing requires at least one source dataset.")
-        dim = kwargs.pop("model_dim", "model")
         paired = {model: pair_data(name, method, data, target_data, dict(kwargs), mask=mask) for model, data in source_data.items()}
         combined = combine_paired_data(paired, dim=dim)
         # Observation fields are shared across models. Collapse fields whose

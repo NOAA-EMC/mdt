@@ -32,7 +32,7 @@ def test_compute_statistics_no_manual_fallbacks(mocker):
         coords={"lat": np.arange(10), "lon": np.arange(10)},
     )
 
-    kwargs = {"obs_var": "obs", "mod_var": "mod", "weights": "w"}
+    kwargs = {"obs_var": "obs", "mod_var": "mod", "weights": "w", "allow_unweighted_fallback": True}
 
     # Test MB - should call the mock_mb_no_weights directly (unweighted) and NOT the fallback wsm
     res = compute_statistics("test_mb", ["MB"], ds, kwargs)

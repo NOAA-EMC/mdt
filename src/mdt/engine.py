@@ -28,6 +28,19 @@ def _serialize_local_pairing_tasks(clusters_cfg: Dict[str, Any], pairing_mode: s
     return pairing_mode == "serial" and all(cfg.get("mode", "local") == "local" for cfg in clusters_cfg.values())
 
 
+def _resolve_task_output(value: Any) -> Any:
+    """Resolve nested future inputs without changing xarray objects or model names."""
+    if hasattr(value, "result") and callable(value.result):
+        value = value.result()
+    if isinstance(value, dict):
+        return {key: _resolve_task_output(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_resolve_task_output(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_resolve_task_output(item) for item in value)
+    return value
+
+
 def prefect_calculate_reduction(
     name: str,
     data: Any,
@@ -339,11 +352,6 @@ class PrefectEngine(Engine):
         pairing_mode = exec_cfg.get("pairing_mode", "serial")
         serialize_pair_tasks = _serialize_local_pairing_tasks(clusters_cfg, pairing_mode)
 
-        def _resolve_output(value: Any) -> Any:
-            if hasattr(value, "result") and callable(value.result):
-                return value.result()
-            return value
-
         # Snapshot mutable engine state into local variables so the flow closure
         # does not capture `self` (which may hold non-picklable Dask client state).
         dag = self.dag
@@ -415,7 +423,7 @@ class PrefectEngine(Engine):
 
                         if serialize_pair_tasks:
                             if last_pair_future is not None:
-                                _resolve_output(last_pair_future)
+                                _resolve_task_output(last_pair_future)
 
                             # Keep Monet pairing on the flow thread for local runs.
                             # This avoids ESMF VM/thread initialization issues in Prefect workers
@@ -423,8 +431,8 @@ class PrefectEngine(Engine):
                             pair_result = prefect_pair_data(
                                 name=node_data["name"],
                                 method=node_data["method"],
-                                source_data=_resolve_output(source_output),
-                                target_data=_resolve_output(target_output),
+                                source_data=_resolve_task_output(source_output),
+                                target_data=_resolve_task_output(target_output),
                                 kwargs={**node_data["kwargs"], "model_dim": node_data.get("model_dim", "model")},
                                 mask=node_data.get("mask"),
                             )
@@ -535,7 +543,7 @@ class PrefectEngine(Engine):
         for node_id, future in task_futures.items():
             try:
                 # This will block until the specific task is done.
-                final_results[node_id] = _resolve_output(future)
+                final_results[node_id] = _resolve_task_output(future)
             except Exception as e:
                 logger.error(f"Task {node_id} failed: {e}")
                 final_results[node_id] = e
