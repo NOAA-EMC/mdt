@@ -1,13 +1,13 @@
 # CHANGELOG
 
 
-## v1.1.0 (2026-10-21)
+## v0.1.0 (2026-10-22)
 
 ### Bug Fixes
 
 - Enhance GFS and GEFS examples with Icechunk access and improvements
-  ([#37](https://github.com/NOAA-EMC/mdt/pull/37),
-  [`50c8f34`](https://github.com/NOAA-EMC/mdt/commit/50c8f3421f142c412b20f25f04d8bd381093992f))
+  ([#37](https://github.com/bbakernoaa/mdt/pull/37),
+  [`50c8f34`](https://github.com/bbakernoaa/mdt/commit/50c8f3421f142c412b20f25f04d8bd381093992f))
 
 * feat: update gefs and gfs examples to use icechunk access with grib2io
 
@@ -146,8 +146,11 @@ Tests were verified in a local environment with all dependencies satisfied.
 
 Co-authored-by: bbakernoaa <22104759+bbakernoaa@users.noreply.github.com>
 
-- Release CI ([#38](https://github.com/NOAA-EMC/mdt/pull/38),
-  [`b7d43c1`](https://github.com/NOAA-EMC/mdt/commit/b7d43c15745972dda0bfcb2a02aa4c895f904999))
+- Improve error handling and logging in load_data function
+  ([`60ba48f`](https://github.com/bbakernoaa/mdt/commit/60ba48f9d50d5cf14b6f91b738d690987cf22800))
+
+- Release CI ([#38](https://github.com/bbakernoaa/mdt/pull/38),
+  [`b7d43c1`](https://github.com/bbakernoaa/mdt/commit/b7d43c15745972dda0bfcb2a02aa4c895f904999))
 
 * feat: update gefs and gfs examples to use icechunk access with grib2io
 
@@ -296,26 +299,64 @@ fix(tests): enhance test coverage for Prefect integration and xarray type contra
 Co-authored-by: bbakernoaa <22104759+bbakernoaa@users.noreply.github.com>
 
 - Resolve linting error in ecflow_engine.py
-  ([`f018c25`](https://github.com/NOAA-EMC/mdt/commit/f018c25c8af43a0d026d1d41ec479a82ff07f84a))
+  ([`f018c25`](https://github.com/bbakernoaa/mdt/commit/f018c25c8af43a0d026d1d41ec479a82ff07f84a))
 
 - Moved `logger` definition after imports to satisfy E402.
+
+- Update linting rules and improve code readability in tests and engine
+  ([`7d1f9b7`](https://github.com/bbakernoaa/mdt/commit/7d1f9b754ddd7d1e92d5614c8aa0307610bd1426))
+
+- Update monet-stats dependency URL in pyproject.toml
+  ([`58d94b9`](https://github.com/bbakernoaa/mdt/commit/58d94b94f9885892715545862d56ec3884484316))
+
+- **ci**: Update checkout step to handle pull requests from forks
+  ([`97c1a03`](https://github.com/bbakernoaa/mdt/commit/97c1a03a183356efbdffbaf1c8a5ba48b64c116d))
+
+- **data**: Repair reader compatibility and offline regression coverage
+  ([`9e025a2`](https://github.com/bbakernoaa/mdt/commit/9e025a29c095c185f0994200e018f3744133d0a3))
+
+- **dependencies**: Update ruff and mypy versions in pre-commit config; improve code reliability
+  ([`374c45f`](https://github.com/bbakernoaa/mdt/commit/374c45f807e661c194f50986c3a40e096f6b0ba5))
+
+- **ecflow**: Load pairing artifacts and preserve model dimensions
+  ([`8ac444d`](https://github.com/bbakernoaa/mdt/commit/8ac444dc05854d26e55c608b2fb1c36d93159a1c))
+
+- **pairing**: Forward masks through Prefect and ecFlow engines
+  ([`d2a0751`](https://github.com/bbakernoaa/mdt/commit/d2a0751d9df5f393358a574640bf678ef5cb0bd0))
+
+- **prefect**: Resolve nested model futures before serial pairing
+  ([`5e921d0`](https://github.com/bbakernoaa/mdt/commit/5e921d0451acc553c7adce777c5e909abc9fdd6a))
+
+- **release**: Set changelog template directory to 'templates'
+  ([`f40a194`](https://github.com/bbakernoaa/mdt/commit/f40a194303fc93f9190fc7b6eb8a1c03d3c0c5ab))
+
+- **statistics**: Require explicit consent for unweighted fallback
+  ([`af93b8b`](https://github.com/bbakernoaa/mdt/commit/af93b8bd1fae8f9843ae54a5a8828619fcc61166))
+
+- **types**: Resolve strict mypy errors across workflow tasks
+  ([`b1df2aa`](https://github.com/bbakernoaa/mdt/commit/b1df2aaca143ee0120915968bd08ac591c08695a))
+
+### Build System
+
+- Pin MONET revisions and use frozen development environments
+  ([`40be248`](https://github.com/bbakernoaa/mdt/commit/40be24822477b80ae37855192a9e71d490ebaa7c))
 
 ### Chores
 
 - Correct PSR dry-run and checkout in CI
-  ([`5588fcc`](https://github.com/NOAA-EMC/mdt/commit/5588fccb2de47cd7bf0083626ba5f5ef64983b16))
+  ([`5588fcc`](https://github.com/bbakernoaa/mdt/commit/5588fccb2de47cd7bf0083626ba5f5ef64983b16))
 
 - Replaced additional_options with args for --dry-run - Added github.head_ref to checkout to avoid
   Detached HEAD in dry-run
 
 - Fix semantic release dry-run option in CI
-  ([`1131e13`](https://github.com/NOAA-EMC/mdt/commit/1131e13946292906c6b01a5fcceaa40ad1eca4aa))
+  ([`1131e13`](https://github.com/bbakernoaa/mdt/commit/1131e13946292906c6b01a5fcceaa40ad1eca4aa))
 
 - Moved --dry-run from root_options to additional_options in ci.yml - Ensures correct argument
   passing to python-semantic-release action
 
 - Harden tests, add extended e2e integration, and drop Python < 3.11
-  ([`c54136e`](https://github.com/NOAA-EMC/mdt/commit/c54136efcc59c9c2d24f0f299eca89e9f673d5fa))
+  ([`c54136e`](https://github.com/bbakernoaa/mdt/commit/c54136efcc59c9c2d24f0f299eca89e9f673d5fa))
 
 - Hardened statistics module with robust metric discovery and weighted fallback tests. - Added
   comprehensive end-to-end integration tests for: - GEFS-Aerosol vs OpenAQ - VIIRS AOD vs ICAP-MME -
@@ -324,7 +365,7 @@ Co-authored-by: bbakernoaa <22104759+bbakernoaa@users.noreply.github.com>
   pass and adhere to Aero Protocol standards.
 
 - Harden tests, add extended e2e integration, drop Python < 3.11, and fix linting
-  ([`ac61571`](https://github.com/NOAA-EMC/mdt/commit/ac61571f69e1aa61b2889fff7c4c144c25e35168))
+  ([`ac61571`](https://github.com/bbakernoaa/mdt/commit/ac61571f69e1aa61b2889fff7c4c144c25e35168))
 
 - Hardened statistics module with robust metric discovery and weighted fallback tests. - Added
   comprehensive end-to-end integration tests for: - GEFS-Aerosol vs OpenAQ - VIIRS AOD vs ICAP-MME -
@@ -334,7 +375,7 @@ Co-authored-by: bbakernoaa <22104759+bbakernoaa@users.noreply.github.com>
   pass and adhere to Aero Protocol standards.
 
 - Harden tests, extend e2e integration, and ensure import isolation
-  ([`96a9e0b`](https://github.com/NOAA-EMC/mdt/commit/96a9e0bc19827e1e987421ca2a8ae304366ea3b9))
+  ([`96a9e0b`](https://github.com/bbakernoaa/mdt/commit/96a9e0bc19827e1e987421ca2a8ae304366ea3b9))
 
 - Moved `dask`, `distributed`, and `dask-jobqueue` imports into methods in `src/mdt/engine.py` and
   `src/mdt/hpc.py` to fix lazy-import isolation issues. - Hardened statistics module with robust
@@ -344,7 +385,7 @@ Co-authored-by: bbakernoaa <22104759+bbakernoaa@users.noreply.github.com>
   Verified all 98 tests pass and adhere to Aero Protocol standards.
 
 - Harden tests, extend e2e integration, drop Python < 3.11
-  ([`5957f4c`](https://github.com/NOAA-EMC/mdt/commit/5957f4cfa01e42a593bef79f9878672b7edd302a))
+  ([`5957f4c`](https://github.com/bbakernoaa/mdt/commit/5957f4cfa01e42a593bef79f9878672b7edd302a))
 
 - Hardened statistics module with robust metric discovery and weighted fallback tests. - Added
   comprehensive end-to-end integration tests for GEFS, OpenAQ, VIIRS, UFS, and AirNow. - Updated
@@ -354,7 +395,7 @@ Co-authored-by: bbakernoaa <22104759+bbakernoaa@users.noreply.github.com>
   test suite. - Verified all 98 tests pass and adhere to Aero Protocol standards.
 
 - Ignore D102 in tests and finalize CI hardening
-  ([`771f692`](https://github.com/NOAA-EMC/mdt/commit/771f6925fd31bec0006cdfc1878d659d9dd7d6b2))
+  ([`771f692`](https://github.com/bbakernoaa/mdt/commit/771f6925fd31bec0006cdfc1878d659d9dd7d6b2))
 
 - Added D102 (missing-docstring-in-public-method) to Ruff ignores for tests/ - Verified all linting
   and type checking passes across src/ and tests/ - Finalized hardened CI/CD pipeline and semantic
@@ -362,8 +403,19 @@ Co-authored-by: bbakernoaa <22104759+bbakernoaa@users.noreply.github.com>
 
 ### Continuous Integration
 
+- Migrate to Python matrix testing and semantic versioning
+  ([`ce7c16c`](https://github.com/bbakernoaa/mdt/commit/ce7c16c0bcaee2324cdd2b588e3de91b5b4a168e))
+
+- Simplify CI workflow to test against Python 3.9, 3.11, and 3.12 matrix - Replace micromamba
+  environment with standard pip installation - Remove develop branch from CI triggers, focus on main
+  only - Add release workflow with python-semantic-release for automated versioning - Migrate
+  version management from static pyproject.toml to dynamic __version__ in __init__.py - Configure
+  semantic-release to parse conventional commits and auto-generate changelog - Streamline linting to
+  check only src/ and tests/ directories - Add verbose pytest output with short traceback format for
+  better test visibility
+
 - Streamline release workflow and update semantic release configuration
-  ([`192e7c1`](https://github.com/NOAA-EMC/mdt/commit/192e7c1e093815446a6d2fa2617ada149a466557))
+  ([`192e7c1`](https://github.com/bbakernoaa/mdt/commit/192e7c1e093815446a6d2fa2617ada149a466557))
 
 - Remove repository owner check to allow releases from forks - Replace manual Python setup and pip
   install with python-semantic-release action v9.21.1 - Consolidate release steps into dedicated
@@ -372,10 +424,99 @@ Co-authored-by: bbakernoaa <22104759+bbakernoaa@users.noreply.github.com>
   deprecated version_toml and branch settings - Add explicit main branch configuration and changelog
   template settings - Simplifies CI/CD pipeline maintenance and ensures consistent release behavior
 
+### Documentation
+
+- Add MDT documentation using Zensical and GitHub Pages deployment
+  ([`08c2b37`](https://github.com/bbakernoaa/mdt/commit/08c2b3798eccea83ea69fff136c5f3fce709d6e9))
+
+- Added 'docs/' directory with intro, quick start, and user guide. - Added 'docs/yaml_format.md'
+  with detailed reference and multiple model comparison example. - Added 'docs/hpc_usage.md' with
+  NOAA platform profiles (Hera, Jet, Orion, etc.). - Created 'zensical.toml' for documentation
+  project configuration. - Added '.github/workflows/deploy-docs.yml' for automated GitHub Pages
+  deployment.
+
+- Finalize MDT documentation with Zensical and NOAA HPC guide
+  ([`23044ab`](https://github.com/bbakernoaa/mdt/commit/23044ab671e89da7ee098c309389f4e2a2e9d49c))
+
+- Added documentation structure using Zensical (Intro, Quick Start, User Guide, YAML Format, HPC
+  Usage). - Included detailed reference for YAML configuration with multiple model comparison
+  example. - Added NOAA HPC platform profiles (Hera, Jet, Orion, Hercules, Gaea, Ursa, WCOSS2). -
+  Removed legacy references to 'Aero Protocol' and 'Two-Track Visualization'. - Added GitHub Action
+  for automated deployment to GitHub Pages.
+
 ### Features
 
+- Ability to save observations and paired data
+  ([`72c6a2d`](https://github.com/bbakernoaa/mdt/commit/72c6a2d41466c5d7175aa7a2eeed59d2d65963c5))
+
+- Add AOD statistics documentation and improve icechunk handling
+  ([`7e87868`](https://github.com/bbakernoaa/mdt/commit/7e8786850cdea1f889a381f8d98571b51a7cae0b))
+
+- Introduced new markdown file for AOD statistics (`gefs_aeronet_stats.md`). - Updated
+  `ConfigParser` to require `icechunk_url` or `icechunk_repo` for the `icechunk` backend. - Enhanced
+  `DAGBuilder` to correctly handle `icechunk_url` and streamline virtualizarr parameters. - Modified
+  `EcFlowEngine` to replace `icechunk_repo` with `icechunk_url` in task variables. - Refactored
+  `load_data` function to prefer `icechunk_url` and improve error handling for date ranges. - Added
+  functions to deduplicate time entries in datasets before pairing. - Updated plotting functions to
+  handle new title formatting and ensure proper variable extraction. - Enhanced tests to cover new
+  functionality and ensure backward compatibility with legacy keys.
+
+- Add area-weighted spatial_mean task following Aero Protocol
+  ([`8def554`](https://github.com/bbakernoaa/mdt/commit/8def55493a146edbcf1e939abe79f7618ab99344))
+
+- Implement `spatial_mean` in `src/mdt/tasks/reductions.py` using cosine of latitude weighting. -
+  Ensure backend-agnostic support for NumPy and Dask via Xarray's native `.weighted()` API. - Add
+  `tests/test_reductions.py` with a Double-Check test verifying identical results for Eager and Lazy
+  backends. - Maintain data provenance by updating `history` attribute. - Ensure all files adhere to
+  ruff formatting and linting standards.
+
+- Add combine functionality to merge paired datasets in MDT
+  ([`001b5d6`](https://github.com/bbakernoaa/mdt/commit/001b5d6d714717d81ebd251567ec7c1b2a3102ce))
+
+- Add pip dependency to environment configuration
+  ([`93e7294`](https://github.com/bbakernoaa/mdt/commit/93e729495c419f50284e172a139c2995f2850cf0))
+
+- Add scipy dependency to environment configuration
+  ([`ae90548`](https://github.com/bbakernoaa/mdt/commit/ae905480f333d7a429caf14f5ebc76dbdfe9f794))
+
+- Add time coordinate promotion for concatenated GRIB2 files and corresponding tests
+  ([`fa2303d`](https://github.com/bbakernoaa/mdt/commit/fa2303d948aec647adeb7fca5d9af61056ce649f))
+
+- Delegate all statistics to monet-stats with weighted support
+  ([`715678f`](https://github.com/bbakernoaa/mdt/commit/715678fbcd1a80b7df1a822361e4d96c830ad27d))
+
+- Refactor `mdt.tasks.statistics` to delegate weighted MB, MAE, MSE, and RMSE to
+  `monet_stats.weighted_spatial_mean`. - Implement `mdt.tasks.reductions.spatial_mean` as a wrapper
+  around `monet-stats`. - Add `tests/test_weighted_stats.py` with Aero Protocol Double-Check
+  verification. - Ensure backend-agnostic behavior and preservation of Dask laziness. - Fix
+  dimension mapping for `monet_stats.weighted_spatial_mean` calls.
+
+- Enhance data processing and plotting capabilities
+  ([`33180b8`](https://github.com/bbakernoaa/mdt/commit/33180b8ea364a24a2f5f2df18b4d0adc9a38d228))
+
+- Added Prefect task wrappers for calculate_reduction and save_data functions in engine.py. -
+  Implemented save_data function to support saving xarray Datasets to Icechunk and Zarr formats in
+  data.py. - Enhanced load_data function to dynamically calculate wind speed from UGRD and VGRD or
+  u_wind and v_wind components. - Improved pair_data function to sort paired datasets by time and
+  preserve duplicate time entries for point observation datasets. - Updated _generate_static_plot to
+  handle profile plotting with interpolation for GFS and IGRA datasets. - Introduced unit tests for
+  save_data and profile plotting functionalities to ensure reliability and correctness.
+
+- Enhance load_data function to support as_xarray and VirtualiZarr ingestion options for readers
+  ([`8e04deb`](https://github.com/bbakernoaa/mdt/commit/8e04deb75dff52ef083c888fa7bdfad26bb8e566))
+
+- Enhance load_data to retry without rejected options and add corresponding tests
+  ([`fb128e9`](https://github.com/bbakernoaa/mdt/commit/fb128e9d4e91e69d0b98d038beb0438bf4f6ad15))
+
+- Enhance pairing functionality to support model-to-model comparison with merge_target option
+  ([`b5b2345`](https://github.com/bbakernoaa/mdt/commit/b5b2345fd798979c382024b1d2f99c8e435435d8))
+
+- Enhance YAML configuration and data handling for local GRIB2 files; improve pairing logic and time
+  coordinate normalization
+  ([`fb4f6a6`](https://github.com/bbakernoaa/mdt/commit/fb4f6a63d40ff0683df3432805c94c801565e616))
+
 - Extend VirtualiZarr support to Prefect and fix monetio dependency
-  ([`83853a6`](https://github.com/NOAA-EMC/mdt/commit/83853a67b9e384cabb289f7a3d39d7832f89df62))
+  ([`83853a6`](https://github.com/bbakernoaa/mdt/commit/83853a67b9e384cabb289f7a3d39d7832f89df62))
 
 - Update `PrefectEngine` to recognize VirtualiZarr-enabled loading tasks. - Apply `virtualizarr`
   tags and custom `task_run_name` to Prefect tasks via `.with_options()`. - Enhance
@@ -384,7 +525,7 @@ Co-authored-by: bbakernoaa <22104759+bbakernoaa@users.noreply.github.com>
   comprehensive mock-based unit tests in `tests/test_prefect_zarr_store.py`.
 
 - Extend VirtualiZarr support to Prefect execution path
-  ([`8850117`](https://github.com/NOAA-EMC/mdt/commit/885011792447b9226a86d33f8a95ded70b88159e))
+  ([`8850117`](https://github.com/bbakernoaa/mdt/commit/885011792447b9226a86d33f8a95ded70b88159e))
 
 - Update `PrefectEngine` to recognize VirtualiZarr-enabled loading tasks. - Apply `virtualizarr`
   tags and custom `task_run_name` to Prefect tasks. - Enhance `prefect_load_data` with detailed
@@ -392,7 +533,7 @@ Co-authored-by: bbakernoaa <22104759+bbakernoaa@users.noreply.github.com>
   `tests/test_prefect_zarr_store.py`.
 
 - Extend VirtualiZarr support to Prefect path for full parity with ecFlow
-  ([`1d3afc8`](https://github.com/NOAA-EMC/mdt/commit/1d3afc877dd8cdda6941b2d6736d676dbe01c339))
+  ([`1d3afc8`](https://github.com/bbakernoaa/mdt/commit/1d3afc877dd8cdda6941b2d6736d676dbe01c339))
 
 - Updated `PrefectEngine` in `src/mdt/engine.py` to identify VirtualiZarr-enabled tasks. - Applied
   Prefect tags ('virtualizarr') and custom task run names for better observability. - Enhanced
@@ -402,7 +543,7 @@ Co-authored-by: bbakernoaa <22104759+bbakernoaa@users.noreply.github.com>
   `tests/test_prefect_zarr_store.py`.
 
 - Extend VirtualiZarr support to Prefect with robust tests
-  ([`31bd992`](https://github.com/NOAA-EMC/mdt/commit/31bd99200c10efdec9e6f77b51bda5aff1f29cac))
+  ([`31bd992`](https://github.com/bbakernoaa/mdt/commit/31bd99200c10efdec9e6f77b51bda5aff1f29cac))
 
 - Update `PrefectEngine` to support VirtualiZarr tagging and custom task names. - Enhance logging
   for VirtualiZarr tasks in `prefect_load_data`. - Fix monetio dependency branch in
@@ -410,7 +551,7 @@ Co-authored-by: bbakernoaa <22104759+bbakernoaa@users.noreply.github.com>
   linting issues in test files.
 
 - Full VirtualiZarr support for Prefect with dependency fix
-  ([`df0bd2d`](https://github.com/NOAA-EMC/mdt/commit/df0bd2d022028c5b298b028fc4876e823a55d44b))
+  ([`df0bd2d`](https://github.com/bbakernoaa/mdt/commit/df0bd2d022028c5b298b028fc4876e823a55d44b))
 
 - Update `PrefectEngine` to support VirtualiZarr tagging, custom run names, and detailed logging
   (including `icechunk_repo`) for parity with ecFlow. - Fix blocking installation error by updating
@@ -419,7 +560,7 @@ Co-authored-by: bbakernoaa <22104759+bbakernoaa@users.noreply.github.com>
   `tests/test_prefect_zarr_store.py`.
 
 - Harden CI and introduce semantic versioning
-  ([`4a6280d`](https://github.com/NOAA-EMC/mdt/commit/4a6280de6d6dd78c4332df4377043ef3a72c208e))
+  ([`4a6280d`](https://github.com/bbakernoaa/mdt/commit/4a6280de6d6dd78c4332df4377043ef3a72c208e))
 
 - Reorganized CI into parallel jobs for linting, type-checking, and testing - Implemented strict
   MyPy type checking and expanded Ruff ruleset - Added comprehensive type hints across the entire
@@ -432,7 +573,7 @@ Co-authored-by: bbakernoaa <22104759+bbakernoaa@users.noreply.github.com>
   via `uvx` and reusable workflows
 
 - Harden CI and introduce semantic versioning
-  ([`aafb18e`](https://github.com/NOAA-EMC/mdt/commit/aafb18e7c61218093726e7d00b0454c8db0a1e12))
+  ([`aafb18e`](https://github.com/bbakernoaa/mdt/commit/aafb18e7c61218093726e7d00b0454c8db0a1e12))
 
 - Reorganized CI into parallel jobs for linting, type-checking, and testing - Implemented strict
   MyPy type checking and expanded Ruff ruleset - Added comprehensive type hints across the entire
@@ -445,7 +586,7 @@ Co-authored-by: bbakernoaa <22104759+bbakernoaa@users.noreply.github.com>
   tool access in CI via `uvx` and reusable workflows
 
 - Harden CI and introduce semantic versioning
-  ([`6d5163e`](https://github.com/NOAA-EMC/mdt/commit/6d5163e8ccc2b3bab03e3de0a6702cfc3d9c6cd5))
+  ([`6d5163e`](https://github.com/bbakernoaa/mdt/commit/6d5163e8ccc2b3bab03e3de0a6702cfc3d9c6cd5))
 
 - Reorganized CI into parallel jobs for linting, type-checking, and testing - Implemented strict
   MyPy type checking and expanded Ruff ruleset - Added comprehensive type hints across the entire
@@ -456,7 +597,7 @@ Co-authored-by: bbakernoaa <22104759+bbakernoaa@users.noreply.github.com>
   Ensured consistent and robust tool access in CI via `uvx` and reusable workflows
 
 - Harden CI and introduce semantic versioning
-  ([`a229203`](https://github.com/NOAA-EMC/mdt/commit/a229203eb00da220d9ca3785f77e1d77ea051976))
+  ([`a229203`](https://github.com/bbakernoaa/mdt/commit/a229203eb00da220d9ca3785f77e1d77ea051976))
 
 - Reorganized CI into parallel jobs for linting, type-checking, and testing - Implemented strict
   MyPy type checking and expanded Ruff ruleset - Added comprehensive type hints across the entire
@@ -467,7 +608,7 @@ Co-authored-by: bbakernoaa <22104759+bbakernoaa@users.noreply.github.com>
   Ensured consistent and robust tool access in CI via `uvx` and reusable workflows
 
 - Harden CI and introduce semantic versioning
-  ([`5c2f800`](https://github.com/NOAA-EMC/mdt/commit/5c2f8008ddd91a783d20830a65ef0ca412222f38))
+  ([`5c2f800`](https://github.com/bbakernoaa/mdt/commit/5c2f8008ddd91a783d20830a65ef0ca412222f38))
 
 - Separates CI into parallel lint, type-check, and test jobs - Implements strict MyPy type checking
   and expanded Ruff rules - Adds comprehensive type hints across the `src/mdt` codebase - Automates
@@ -478,7 +619,7 @@ Co-authored-by: bbakernoaa <22104759+bbakernoaa@users.noreply.github.com>
   casting and type ignores where necessary
 
 - Harden CI and introduce semantic versioning
-  ([`2010a64`](https://github.com/NOAA-EMC/mdt/commit/2010a642ceb33f690ad4f5b5b2ff5c623f4e1934))
+  ([`2010a64`](https://github.com/bbakernoaa/mdt/commit/2010a642ceb33f690ad4f5b5b2ff5c623f4e1934))
 
 - Separates CI into lint, type-check, and test jobs - Configures strict MyPy type checking and
   expanded Ruff rules - Adds full type hints across the `src/mdt` codebase - Automates semantic
@@ -489,7 +630,7 @@ Co-authored-by: bbakernoaa <22104759+bbakernoaa@users.noreply.github.com>
   proper casting
 
 - Harden CI and introduce semantic versioning
-  ([`a5ec9ea`](https://github.com/NOAA-EMC/mdt/commit/a5ec9ea9d7474c5ef7d7f25983120d02a818dd9d))
+  ([`a5ec9ea`](https://github.com/bbakernoaa/mdt/commit/a5ec9ea9d7474c5ef7d7f25983120d02a818dd9d))
 
 - Separates CI into lint, type-check, and test jobs - Configures strict MyPy type checking and
   expanded Ruff rules - Adds full type hints across the `src/mdt` codebase - Automates semantic
@@ -499,7 +640,7 @@ Co-authored-by: bbakernoaa <22104759+bbakernoaa@users.noreply.github.com>
   use reusable patterns and correct job dependencies
 
 - Harden CI and introduce semantic versioning
-  ([`a6d6457`](https://github.com/NOAA-EMC/mdt/commit/a6d6457b68c9056b352af35a171430156fda0bf9))
+  ([`a6d6457`](https://github.com/bbakernoaa/mdt/commit/a6d6457b68c9056b352af35a171430156fda0bf9))
 
 - Separates CI into lint, type-check, and test jobs - Configures strict MyPy type checking and
   expanded Ruff rules - Adds full type hints across the `src/mdt` codebase - Automates semantic
@@ -508,7 +649,7 @@ Co-authored-by: bbakernoaa <22104759+bbakernoaa@users.noreply.github.com>
   - Fixes CI lint job to use uvx for ruff access
 
 - Harden CI and introduce semantic versioning
-  ([`722ff77`](https://github.com/NOAA-EMC/mdt/commit/722ff7733da2fcea4cc451107f9abc38a65b8949))
+  ([`722ff77`](https://github.com/bbakernoaa/mdt/commit/722ff7733da2fcea4cc451107f9abc38a65b8949))
 
 - Separates CI into lint, type-check, and test jobs - Configures strict MyPy type checking and
   expanded Ruff rules - Adds full type hints across the `src/mdt` codebase - Automates semantic
@@ -516,7 +657,7 @@ Co-authored-by: bbakernoaa <22104759+bbakernoaa@users.noreply.github.com>
   Supports pre-releases on the develop branch - Implements release dry-run for pull requests to main
 
 - Improve user experience with enhanced CLI and validation
-  ([`86148c7`](https://github.com/NOAA-EMC/mdt/commit/86148c74df0b3246ce49e96122198e5accc1732a))
+  ([`86148c7`](https://github.com/bbakernoaa/mdt/commit/86148c74df0b3246ce49e96122198e5accc1732a))
 
 - Added `validate` subcommand to check YAML configs and DAG consistency. - Added `template`
   subcommand to generate sample configurations. - Added `--version` and `--debug` flags to the main
@@ -525,7 +666,7 @@ Co-authored-by: bbakernoaa <22104759+bbakernoaa@users.noreply.github.com>
   quick-start guide. - Fixed existing tests to comply with new validation rules.
 
 - Improve UX and enhance ecFlow suite generation
-  ([`9571ffa`](https://github.com/NOAA-EMC/mdt/commit/9571ffa1a9d842f4e32638566edb67e1a9746cd2))
+  ([`9571ffa`](https://github.com/bbakernoaa/mdt/commit/9571ffa1a9d842f4e32638566edb67e1a9746cd2))
 
 - Added `validate` and `template` subcommands to CLI. - Implemented stricter configuration
   validation. - Improved README documentation. - Enhanced `EcFlowEngine` to save `.def` suite files
@@ -533,7 +674,7 @@ Co-authored-by: bbakernoaa <22104759+bbakernoaa@users.noreply.github.com>
   tests pass.
 
 - Improve UX and enhance ecFlow suite generation
-  ([`bff62e4`](https://github.com/NOAA-EMC/mdt/commit/bff62e4da204a634d783d871219888044a9c7d49))
+  ([`bff62e4`](https://github.com/bbakernoaa/mdt/commit/bff62e4da204a634d783d871219888044a9c7d49))
 
 - Added `validate` and `template` subcommands to CLI. - Implemented stricter configuration
   validation. - Improved README documentation. - Enhanced `EcFlowEngine` to save `.def` suite files
@@ -541,134 +682,18 @@ Co-authored-by: bbakernoaa <22104759+bbakernoaa@users.noreply.github.com>
   validation rules.
 
 - Improve weighted stats fallbacks and expand plotting support
-  ([`e791c6f`](https://github.com/NOAA-EMC/mdt/commit/e791c6fd2ec92f7cc5aaa4df85be2473bedbc7c1))
+  ([`e791c6f`](https://github.com/bbakernoaa/mdt/commit/e791c6fd2ec92f7cc5aaa4df85be2473bedbc7c1))
 
 - Add manual weighted fallbacks for MB, BIAS, MBIAS, and MAE in statistics task - Add support for
   'timeseries' and 'taylor' plot types in plotting task - Implement xarray-to-dataframe conversion
   for specific plot types - Add explicit resource management (close()) for static plots - Add
   comprehensive tests for new statistics and plotting features
 
-- Streamline orchestrator logic and fix linting errors
-  ([`2e050d8`](https://github.com/NOAA-EMC/mdt/commit/2e050d8f59da9b1bba207f6ceb089eccb4f9cd76))
-
-- Remove manual weighted fallback statistics in `src/mdt/tasks/statistics.py` - Implement dynamic
-  plot class discovery in `src/mdt/tasks/plotting.py` - Fix linting errors (unused imports and
-  sorting) across src and tests - Update tests to reflect library delegation architecture
-
-- Streamline statistics and plotting by delegating to specialized libraries
-  ([`4b26708`](https://github.com/NOAA-EMC/mdt/commit/4b267083154604cae00a90d700bf2527ece0946d))
-
-- Remove manual weighted fallback statistics in `src/mdt/tasks/statistics.py` to rely strictly on
-  `monet-stats`. - Implement dynamic plot class discovery in `src/mdt/tasks/plotting.py` to
-  automatically support all `monet-plots` types. - Generalize Track A/B logic in plotting task. -
-  Update test suite to reflect new delegation-first architecture.
-
-- **zarr-store**: Add VirtualiZarr support with multiple backend options
-  ([`e2ba0bf`](https://github.com/NOAA-EMC/mdt/commit/e2ba0bf2a8b52af1c0618b3ef072bc6f295fd0a2))
-
-- Add zarr_store configuration validation in config.py with support for kerchunk_json,
-  kerchunk_parquet, and icechunk backends - Implement VirtualiZarr parameter passing through
-  DAGBuilder to load_data tasks - Update EcFlowEngine to inject zarr_store configuration as task
-  variables for ecFlow execution - Enhance load_data function to accept and handle VirtualiZarr
-  parameters with fallback to standard monetio loading - Add hypothesis to dev dependencies for
-  property-based testing - Update monetio dependency to feature/virtualizarr branch for VirtualiZarr
-  compatibility - Add comprehensive test coverage for zarr_store configuration across config, dag,
-  ecflow, and data loading modules - Enables users to virtualize large datasets using kerchunk or
-  icechunk backends for improved performance and reduced memory footprint
-
-### Testing
-
-- Harden statistics tests and ensure end-to-end integration
-  ([`17f2e78`](https://github.com/NOAA-EMC/mdt/commit/17f2e7804322dc457be805eb1683074883473777))
-
-- Add `tests/test_aero_weighted_fallbacks.py` to verify metric discovery and manual weighted
-  fallback logic. - Update `tests/test_merra2_icap_aeronet.py` to use real `monet-stats` library
-  functions instead of mocks. - Refine `tests/test_tasks.py` to include explicit checks for Dask
-  laziness and provenance metadata. - Ensure all 95 tests pass and comply with Aero Protocol
-  standards.
-
-- Harden tests and add extended integration tests for GEFS, OpenAQ, VIIRS, UFS, and AirNow
-  ([`d524980`](https://github.com/NOAA-EMC/mdt/commit/d524980e24bc4fbcf965f66fb0c8efd145155430))
-
-- Add `tests/test_aero_weighted_fallbacks.py` for robust metric discovery and fallback. - Update
-  `tests/test_merra2_icap_aeronet.py` with real library calls. - Add `tests/test_gefs_openaq.py` for
-  GEFS-Aerosol vs OpenAQ workflow. - Add `tests/test_viirs_aod.py` for VIIRS AOD vs ICAP-MME
-  workflow. - Add `tests/test_ufs_airnow.py` for UFS-AQM vs AirNow workflow. - Ensure all 98 tests
-  pass and preserve Dask laziness.
-
-
-## v1.0.0 (2026-04-09)
-
-### Continuous Integration
-
-- Migrate to Python matrix testing and semantic versioning
-  ([`ce7c16c`](https://github.com/NOAA-EMC/mdt/commit/ce7c16c0bcaee2324cdd2b588e3de91b5b4a168e))
-
-- Simplify CI workflow to test against Python 3.9, 3.11, and 3.12 matrix - Replace micromamba
-  environment with standard pip installation - Remove develop branch from CI triggers, focus on main
-  only - Add release workflow with python-semantic-release for automated versioning - Migrate
-  version management from static pyproject.toml to dynamic __version__ in __init__.py - Configure
-  semantic-release to parse conventional commits and auto-generate changelog - Streamline linting to
-  check only src/ and tests/ directories - Add verbose pytest output with short traceback format for
-  better test visibility
-
-### Documentation
-
-- Add MDT documentation using Zensical and GitHub Pages deployment
-  ([`08c2b37`](https://github.com/NOAA-EMC/mdt/commit/08c2b3798eccea83ea69fff136c5f3fce709d6e9))
-
-- Added 'docs/' directory with intro, quick start, and user guide. - Added 'docs/yaml_format.md'
-  with detailed reference and multiple model comparison example. - Added 'docs/hpc_usage.md' with
-  NOAA platform profiles (Hera, Jet, Orion, etc.). - Created 'zensical.toml' for documentation
-  project configuration. - Added '.github/workflows/deploy-docs.yml' for automated GitHub Pages
-  deployment.
-
-- Finalize MDT documentation with Zensical and NOAA HPC guide
-  ([`23044ab`](https://github.com/NOAA-EMC/mdt/commit/23044ab671e89da7ee098c309389f4e2a2e9d49c))
-
-- Added documentation structure using Zensical (Intro, Quick Start, User Guide, YAML Format, HPC
-  Usage). - Included detailed reference for YAML configuration with multiple model comparison
-  example. - Added NOAA HPC platform profiles (Hera, Jet, Orion, Hercules, Gaea, Ursa, WCOSS2). -
-  Removed legacy references to 'Aero Protocol' and 'Two-Track Visualization'. - Added GitHub Action
-  for automated deployment to GitHub Pages.
-
-### Features
-
-- Add area-weighted spatial_mean task following Aero Protocol
-  ([`8def554`](https://github.com/NOAA-EMC/mdt/commit/8def55493a146edbcf1e939abe79f7618ab99344))
-
-- Implement `spatial_mean` in `src/mdt/tasks/reductions.py` using cosine of latitude weighting. -
-  Ensure backend-agnostic support for NumPy and Dask via Xarray's native `.weighted()` API. - Add
-  `tests/test_reductions.py` with a Double-Check test verifying identical results for Eager and Lazy
-  backends. - Maintain data provenance by updating `history` attribute. - Ensure all files adhere to
-  ruff formatting and linting standards.
-
-- Add combine functionality to merge paired datasets in MDT
-  ([`001b5d6`](https://github.com/NOAA-EMC/mdt/commit/001b5d6d714717d81ebd251567ec7c1b2a3102ce))
-
-- Add pip dependency to environment configuration
-  ([`93e7294`](https://github.com/NOAA-EMC/mdt/commit/93e729495c419f50284e172a139c2995f2850cf0))
-
-- Add scipy dependency to environment configuration
-  ([`ae90548`](https://github.com/NOAA-EMC/mdt/commit/ae905480f333d7a429caf14f5ebc76dbdfe9f794))
-
-- Delegate all statistics to monet-stats with weighted support
-  ([`715678f`](https://github.com/NOAA-EMC/mdt/commit/715678fbcd1a80b7df1a822361e4d96c830ad27d))
-
-- Refactor `mdt.tasks.statistics` to delegate weighted MB, MAE, MSE, and RMSE to
-  `monet_stats.weighted_spatial_mean`. - Implement `mdt.tasks.reductions.spatial_mean` as a wrapper
-  around `monet-stats`. - Add `tests/test_weighted_stats.py` with Aero Protocol Double-Check
-  verification. - Ensure backend-agnostic behavior and preservation of Dask laziness. - Fix
-  dimension mapping for `monet_stats.weighted_spatial_mean` calls.
-
-- Enhance pairing functionality to support model-to-model comparison with merge_target option
-  ([`b5b2345`](https://github.com/NOAA-EMC/mdt/commit/b5b2345fd798979c382024b1d2f99c8e435435d8))
-
 - Remove unnecessary git dependencies from environment configuration
-  ([`7694ff8`](https://github.com/NOAA-EMC/mdt/commit/7694ff82609d44973f190813c75f468e6dd24bbd))
+  ([`7694ff8`](https://github.com/bbakernoaa/mdt/commit/7694ff82609d44973f190813c75f468e6dd24bbd))
 
 - Robust statistics dispatch via monet-stats weighted engine
-  ([`ae70dda`](https://github.com/NOAA-EMC/mdt/commit/ae70ddaa874ff56c017c57af8fa55552f5bb47d1))
+  ([`ae70dda`](https://github.com/bbakernoaa/mdt/commit/ae70ddaa874ff56c017c57af8fa55552f5bb47d1))
 
 - Refactor `mdt.tasks.statistics` to robustly delegate weighted MB, MAE, MSE, and RMSE to
   `monet_stats.weighted_spatial_mean`. - Ensure provenance tracking (Rule 2.3) for all statistical
@@ -676,14 +701,89 @@ Co-authored-by: bbakernoaa <22104759+bbakernoaa@users.noreply.github.com>
   Provide `mdt.tasks.reductions.spatial_mean` wrapper. - Add comprehensive Double-Check tests for
   both Dataset and DataArray inputs. - Comply with all ruff formatting and linting rules.
 
+- Streamline orchestrator logic and fix linting errors
+  ([`2e050d8`](https://github.com/bbakernoaa/mdt/commit/2e050d8f59da9b1bba207f6ceb089eccb4f9cd76))
+
+- Remove manual weighted fallback statistics in `src/mdt/tasks/statistics.py` - Implement dynamic
+  plot class discovery in `src/mdt/tasks/plotting.py` - Fix linting errors (unused imports and
+  sorting) across src and tests - Update tests to reflect library delegation architecture
+
+- Streamline statistics and plotting by delegating to specialized libraries
+  ([`4b26708`](https://github.com/bbakernoaa/mdt/commit/4b267083154604cae00a90d700bf2527ece0946d))
+
+- Remove manual weighted fallback statistics in `src/mdt/tasks/statistics.py` to rely strictly on
+  `monet-stats`. - Implement dynamic plot class discovery in `src/mdt/tasks/plotting.py` to
+  automatically support all `monet-plots` types. - Generalize Track A/B logic in plotting task. -
+  Update test suite to reflect new delegation-first architecture.
+
+- Support icechunk-grib2io and direct loading of existing zarr/icechunk stores
+  ([`45c5167`](https://github.com/bbakernoaa/mdt/commit/45c5167d190419590ef52dfa9980331900f1e2cd))
+
+This commit fulfills two major enhancements: 1. Updates GEFS and GFS examples to utilize Icechunk
+  virtualization via grib2io, including support for robustness parameters (retries, timeouts). 2.
+  Implements a generic mechanism to load any data source directly from an existing Zarr or Icechunk
+  store (e.g., preprocessed AERONET), bypassing standard monetio readers.
+
+Key changes: - Modified `src/mdt/config.py` to allow 'zarr' as a valid backend. - Enhanced
+  `src/mdt/dag.py` to propagate 'existing_zarr', 'zarr_kwargs', and robustness settings from YAML to
+  tasks. - Updated `src/mdt/tasks/data.py` with a prioritized direct-loading path for existing
+  stores and improved fallback keyword stripping. - Updated documentation (`yaml_format.md`,
+  `examples.md`) and example YAML files. - Expanded unit tests to cover direct loading logic and
+  fixed Hypothesis test deadline issues in the development environment.
+
+Tests were verified in a local environment with all dependencies satisfied.
+
 - Update dependencies in environment configuration and pyproject.toml
-  ([`0223902`](https://github.com/NOAA-EMC/mdt/commit/022390289cb1e5a05d78f1af3d116e124e4ef926))
+  ([`0223902`](https://github.com/bbakernoaa/mdt/commit/022390289cb1e5a05d78f1af3d116e124e4ef926))
 
 - Update dependencies in environment.yml and pyproject.toml for monet packages
-  ([`3e62b94`](https://github.com/NOAA-EMC/mdt/commit/3e62b94da6fa745b2e27a5679b72092948f85297))
+  ([`3e62b94`](https://github.com/bbakernoaa/mdt/commit/3e62b94da6fa745b2e27a5679b72092948f85297))
+
+- Update documentation and statistics files; enhance .gitignore for new directories
+  ([`2261000`](https://github.com/bbakernoaa/mdt/commit/2261000f3772295015f63c3013a0d6492204938f))
+
+- Update gefs and gfs examples to use icechunk access with grib2io
+  ([`c89d943`](https://github.com/bbakernoaa/mdt/commit/c89d9432313028d17aa2b357bcaf934933b6d76c))
+
+This commit updates the GFS and GEFS verification examples to utilize the new Icechunk
+  virtualization capability. It also enhances the core DAG builder to support Icechunk-specific
+  parameters and robustness settings for cloud-native GRIB2 access.
+
+Key changes: - Modified `src/mdt/dag.py` to automatically set `use_icechunk=True` and propagate
+  robustness parameters (`max_scan_attempts`, `network_timeout`, `max_concurrent_requests`) from the
+  YAML configuration to the data loading tasks. - Updated `src/mdt/tasks/data.py` to correctly
+  handle the new virtualization keys during fallback scenarios by adding them to `vz_keys`. -
+  Updated `docs/examples/gefs_aeronet.yaml` and `docs/examples/gfs_ish_lite.yaml` to demonstrate the
+  new `icechunk` backend configuration. - Enhanced `docs/yaml_format.md` and `docs/examples.md` with
+  descriptions and examples for the new Icechunk and grib2io-related settings. - Updated unit tests
+  to verify proper handling of new Icechunk and robustness parameters.
+
+Tests were verified using a pip-installed environment with dependencies fetched from GitHub as
+  specified in `pyproject.toml`.
+
+- Update gefs and gfs examples to use icechunk access with grib2io
+  ([`d0cb777`](https://github.com/bbakernoaa/mdt/commit/d0cb777da96d3b723056430309ce10d0323c4ff4))
+
+This commit updates the GFS and GEFS verification examples to utilize the new Icechunk
+  virtualization capability. It also enhances the core DAG builder to support Icechunk-specific
+  parameters and robustness settings for cloud-native GRIB2 access.
+
+Key changes: - Modified `src/mdt/dag.py` to automatically set `use_icechunk=True` and propagate
+  robustness parameters (`max_scan_attempts`, `network_timeout`, `max_concurrent_requests`) from the
+  YAML configuration to the data loading tasks. - Updated `src/mdt/tasks/data.py` to correctly
+  handle the new virtualization keys during fallback scenarios. - Updated
+  `docs/examples/gefs_aeronet.yaml` and `docs/examples/gfs_ish_lite.yaml` to demonstrate the new
+  `icechunk` backend configuration. - Enhanced `docs/yaml_format.md` and `docs/examples.md` with
+  descriptions and examples for the new Icechunk and grib2io-related settings.
+
+- Update GFS model configuration and add wind statistics and plots
+  ([`18040e0`](https://github.com/bbakernoaa/mdt/commit/18040e07f686de6266979311f0677a14462393c2))
+
+- Update Python version to 3.12 and improve configuration validation messages
+  ([`acf95f1`](https://github.com/bbakernoaa/mdt/commit/acf95f11e85c0bf76b768714a9c77baf4ca4df76))
 
 - **engine**: Add pluggable orchestrator registry and ecFlow support
-  ([`1f16674`](https://github.com/NOAA-EMC/mdt/commit/1f16674f2ca1e33cc1b93026e51d5c68f68bda41))
+  ([`1f16674`](https://github.com/bbakernoaa/mdt/commit/1f16674f2ca1e33cc1b93026e51d5c68f68bda41))
 
 - Add EngineRegistry for dynamic orchestrator backend selection - Implement EcFlowEngine to support
   ecFlow as an orchestration alternative - Add --orchestrator CLI flag to override backend specified
@@ -693,7 +793,7 @@ Co-authored-by: bbakernoaa <22104759+bbakernoaa@users.noreply.github.com>
   outputs - Enable lazy importing of ecflow to avoid hard dependency
 
 - **stats**: Implement weighted Pearson Correlation in statistics task
-  ([`f821a16`](https://github.com/NOAA-EMC/mdt/commit/f821a1634c49d9d7672fec851a90c7bb8469f2b4))
+  ([`f821a16`](https://github.com/bbakernoaa/mdt/commit/f821a1634c49d9d7672fec851a90c7bb8469f2b4))
 
 Implemented Weighted Pearson Correlation (CORR/PEARSONR/CORRELATION) in
   `src/mdt/tasks/statistics.py` by orchestrating calls to `monet_stats.weighted_spatial_mean`. This
@@ -706,7 +806,7 @@ Implemented Weighted Pearson Correlation (CORR/PEARSONR/CORRELATION) in
 Complies with Pangeo philosophy and ensures accurate metrics on non-uniform geospatial grids.
 
 - **stats**: Implement weighted Pearson Correlation in statistics task
-  ([`62bc557`](https://github.com/NOAA-EMC/mdt/commit/62bc55773787fc2c6be8c7329b4c060c4b7f384a))
+  ([`62bc557`](https://github.com/bbakernoaa/mdt/commit/62bc55773787fc2c6be8c7329b4c060c4b7f384a))
 
 Implemented Weighted Pearson Correlation (CORR/PEARSONR/CORRELATION) in
   `src/mdt/tasks/statistics.py` using `monet_stats.weighted_spatial_mean`. This implementation
@@ -718,7 +818,7 @@ Implemented Weighted Pearson Correlation (CORR/PEARSONR/CORRELATION) in
 Complies with Pangeo philosophy and ensures accurate metrics on non-uniform geospatial grids.
 
 - **tasks**: Refactor stats and plotting tasks as orchestrators
-  ([`e3a695b`](https://github.com/NOAA-EMC/mdt/commit/e3a695bf01051479ab4d0246a849886715b9e65a))
+  ([`e3a695b`](https://github.com/bbakernoaa/mdt/commit/e3a695bf01051479ab4d0246a849886715b9e65a))
 
 Refactored `statistics.py` and `plotting.py` to strictly act as orchestrators for the MONET
   ecosystem: - Statistics: Delegated weighted calculations (MB, RMSE, PEARSONR) to
@@ -728,3 +828,44 @@ Refactored `statistics.py` and `plotting.py` to strictly act as orchestrators fo
   across all refactored tasks. - Validation: Added Double-Check tests for weighted correlation and
   provided a comprehensive `visualization_demo.py`. - Documentation: Updated function signatures and
   logic to reflect the orchestration role of MDT.
+
+- **zarr-store**: Add VirtualiZarr support with multiple backend options
+  ([`e2ba0bf`](https://github.com/bbakernoaa/mdt/commit/e2ba0bf2a8b52af1c0618b3ef072bc6f295fd0a2))
+
+- Add zarr_store configuration validation in config.py with support for kerchunk_json,
+  kerchunk_parquet, and icechunk backends - Implement VirtualiZarr parameter passing through
+  DAGBuilder to load_data tasks - Update EcFlowEngine to inject zarr_store configuration as task
+  variables for ecFlow execution - Enhance load_data function to accept and handle VirtualiZarr
+  parameters with fallback to standard monetio loading - Add hypothesis to dev dependencies for
+  property-based testing - Update monetio dependency to feature/virtualizarr branch for VirtualiZarr
+  compatibility - Add comprehensive test coverage for zarr_store configuration across config, dag,
+  ecflow, and data loading modules - Enables users to virtualize large datasets using kerchunk or
+  icechunk backends for improved performance and reduced memory footprint
+
+### Refactoring
+
+- Improve error handling and variable naming in configuration and data processing functions
+  ([`cb4b0fa`](https://github.com/bbakernoaa/mdt/commit/cb4b0fa75bc294dd695686ec4d46ec7c45c447d7))
+
+### Testing
+
+- Harden statistics tests and ensure end-to-end integration
+  ([`17f2e78`](https://github.com/bbakernoaa/mdt/commit/17f2e7804322dc457be805eb1683074883473777))
+
+- Add `tests/test_aero_weighted_fallbacks.py` to verify metric discovery and manual weighted
+  fallback logic. - Update `tests/test_merra2_icap_aeronet.py` to use real `monet-stats` library
+  functions instead of mocks. - Refine `tests/test_tasks.py` to include explicit checks for Dask
+  laziness and provenance metadata. - Ensure all 95 tests pass and comply with Aero Protocol
+  standards.
+
+- Harden tests and add extended integration tests for GEFS, OpenAQ, VIIRS, UFS, and AirNow
+  ([`d524980`](https://github.com/bbakernoaa/mdt/commit/d524980e24bc4fbcf965f66fb0c8efd145155430))
+
+- Add `tests/test_aero_weighted_fallbacks.py` for robust metric discovery and fallback. - Update
+  `tests/test_merra2_icap_aeronet.py` with real library calls. - Add `tests/test_gefs_openaq.py` for
+  GEFS-Aerosol vs OpenAQ workflow. - Add `tests/test_viirs_aod.py` for VIIRS AOD vs ICAP-MME
+  workflow. - Add `tests/test_ufs_airnow.py` for UFS-AQM vs AirNow workflow. - Ensure all 98 tests
+  pass and preserve Dask laziness.
+
+- Separate offline CI from opt-in live integrations
+  ([`4bf5e1b`](https://github.com/bbakernoaa/mdt/commit/4bf5e1bed5e311469bae51a3c5c4179f7cd63ad3))
